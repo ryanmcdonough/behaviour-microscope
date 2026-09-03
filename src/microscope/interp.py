@@ -160,6 +160,19 @@ def _rows(tensor: torch.Tensor) -> torch.Tensor:
     return tensor[0] if tensor.ndim == 3 else tensor
 
 
+def _ids_on_device(handle: ModelHandle, token_ids: list[int]) -> torch.Tensor:
+    """Token ids on the same device as the weights, which ``run_with_cache`` does not do itself.
+
+    The engine's ``generate_stream`` already places ids on ``model.device``. Its ``run_with_cache``
+    free function does not: a Python list becomes a CPU tensor via ``as_batched_tokens``, and the
+    embedding lookup then fails with a device mismatch once the weights are on CUDA. The engine's
+    own ``EagerModel.capture`` works around the same gap by building the tensor on ``self.device``
+    before calling that free function; this is that workaround for the path the rest of this file
+    uses. See RESEARCH.md.
+    """
+    return torch.tensor(token_ids, dtype=torch.long, device=handle.model.device)
+
+
 def capture_residuals(handle: ModelHandle, token_ids: list[int]) -> dict[int, torch.Tensor]:
     """Residual stream at the final prompt position, for every layer.
 
@@ -167,7 +180,7 @@ def capture_residuals(handle: ModelHandle, token_ids: list[int]) -> dict[int, to
     from, and it is the one position that is unambiguously matched across two prompts of
     different token length -- see RESEARCH.md on the alignment problem.
     """
-    cache = run_with_cache(handle.model, token_ids, handle.layer_points())
+    cache = run_with_cache(handle.model, _ids_on_device(handle, token_ids), handle.layer_points())
     return {
         layer: _rows(cache[f"{RESIDUAL_POINT}.{layer}"])[-1].detach().float().cpu()
         for layer in range(handle.n_layers)
@@ -182,7 +195,7 @@ def next_token_logits(handle: ModelHandle, token_ids: list[int]) -> torch.Tensor
     required for Gemma-2, and the reason this uses the model *method* rather than the free
     function. ``verify_logit_path`` checks the result against the sampler's own logits.
     """
-    cache = run_with_cache(handle.model, token_ids, [handle.final_point])
+    cache = run_with_cache(handle.model, _ids_on_device(handle, token_ids), [handle.final_point])
     residual = _rows(cache[handle.final_point])[-1]
     return handle.sync.decode_residuals(residual.unsqueeze(0))[0].detach().float().cpu()
 
@@ -216,8 +229,9 @@ def patched_next_token_logits(
     # Everything except the final position is excluded, which is what makes this a single-position
     # patch rather than a steer applied across the whole prompt.
     mask = list(range(len(token_ids) - 1))
-    with steer(handle.model, spec, prompt_token_ids=token_ids, position_mask=mask):
-        cache = run_with_cache(handle.model, token_ids, [handle.final_point])
+    ids = _ids_on_device(handle, token_ids)
+    with steer(handle.model, spec, prompt_token_ids=ids, position_mask=mask):
+        cache = run_with_cache(handle.model, ids, [handle.final_point])
         residual = _rows(cache[handle.final_point])[-1]
     return handle.sync.decode_residuals(residual.unsqueeze(0))[0].detach().float().cpu()
 
