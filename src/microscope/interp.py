@@ -51,6 +51,9 @@ class ModelHandle:
     n_layers: int
     d_model: int
     letter_token_ids: dict[str, list[int]]
+    # Only consulted on models whose chat template reads it. False keeps the answer in the
+    # first generated token, which is what the forced-choice measurement requires.
+    enable_thinking: bool = False
 
     @property
     def last_layer(self) -> int:
@@ -67,7 +70,14 @@ class ModelHandle:
         self.sync.shutdown()
 
 
-def open_model(model_id: str, *, backend: str = "eager", dtype: str | None = None, **kwargs) -> ModelHandle:
+def open_model(
+    model_id: str,
+    *,
+    backend: str = "eager",
+    dtype: str | None = None,
+    enable_thinking: bool = False,
+    **kwargs,
+) -> ModelHandle:
     """Load a model through interp-engine and warm it up.
 
     ``backend="eager"`` is the default here rather than the engine's ``"auto"`` ladder. See
@@ -99,6 +109,7 @@ def open_model(model_id: str, *, backend: str = "eager", dtype: str | None = Non
         n_layers=model.n_layers,
         d_model=model.d_model,
         letter_token_ids={},
+        enable_thinking=enable_thinking,
     )
     handle.letter_token_ids = _answer_token_ids(model)
     return handle
@@ -149,7 +160,25 @@ def tokenize_prompt(handle: ModelHandle, prompt: str) -> list[int]:
     """
     model = handle.model
     if model.tok.has_chat_template():
-        return list(model.tok.apply_chat_template([{"role": "user", "content": prompt}], tokenize=True))
+        # A hybrid-reasoning model (Qwen3, and others) leaves the assistant turn open by
+        # default, so its first generated token is <think> rather than the answer. The
+        # forced-choice measurement reads the first token, so that would put essentially no
+        # probability on either letter and quietly turn the run into noise -- the letter_mass
+        # quality check would flag it, but only after the run.
+        #
+        # enable_thinking=False makes the template close an empty reasoning block itself, so
+        # the next token is the answer. Asked rather than assumed: a renderer ignores or
+        # rejects a kwarg it does not know, so the engine reports which ones it reads.
+        # Reasoning-vs-not is a variable worth studying (see RESEARCH.md); this pins it to a
+        # known state rather than leaving it to each model's default.
+        template_kwargs: dict = {}
+        if "enable_thinking" in model.tok.accepted_template_kwargs(["enable_thinking"]):
+            template_kwargs["enable_thinking"] = handle.enable_thinking
+        return list(
+            model.tok.apply_chat_template(
+                [{"role": "user", "content": prompt}], tokenize=True, **template_kwargs
+            )
+        )
     # No chat format: complete the prompt directly rather than inventing a template the model
     # was never trained on, which is what the engine refuses to do for you.
     return model.tok.to_tokens(prompt + "\n\nAnswer:")[0].tolist()
