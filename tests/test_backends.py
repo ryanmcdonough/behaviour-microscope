@@ -112,6 +112,46 @@ def test_openai_reasoning_effort_skips_the_logprobs_request(monkeypatch):
     assert "logprobs" not in sent
 
 
+def test_openai_retries_without_logprobs_when_the_model_refuses_them(monkeypatch):
+    """A 400 on logprobs must cost the probabilities, not the whole run."""
+    module = types.ModuleType("openai")
+    client = MagicMock()
+    client.chat.completions.create.side_effect = [
+        Exception("Invalid value for 'top_logprobs': must be less than or equal to 5."),
+        _openai_response("B"),
+    ]
+    module.OpenAI = MagicMock(return_value=client)
+    monkeypatch.setitem(sys.modules, "openai", module)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    m = OpenAIBackend("some-model").measure("prompt")
+    assert m.chosen_letter == "B"
+    assert m.probability_source == "text"
+    # The retry must have dropped the offending parameters rather than resending them.
+    retry = client.chat.completions.create.call_args.kwargs
+    assert "logprobs" not in retry and "top_logprobs" not in retry
+
+
+def test_openai_does_not_swallow_unrelated_errors(monkeypatch):
+    """An auth or quota failure must surface, not be retried into a confusing second failure."""
+    module = types.ModuleType("openai")
+    client = MagicMock()
+    client.chat.completions.create.side_effect = Exception("Incorrect API key provided")
+    module.OpenAI = MagicMock(return_value=client)
+    monkeypatch.setitem(sys.modules, "openai", module)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    with pytest.raises(Exception, match="Incorrect API key"):
+        OpenAIBackend("some-model").measure("prompt")
+
+
+def test_openai_requests_at_most_five_logprobs(monkeypatch):
+    """The endpoint's ceiling. Asking for more is a 400 on every call."""
+    client = _install_fake_openai(monkeypatch, _openai_response("A"))
+    OpenAIBackend("some-model").measure("prompt")
+    assert client.chat.completions.create.call_args.kwargs["top_logprobs"] <= 5
+
+
 def test_openai_backend_cannot_be_used_mechanistically(monkeypatch):
     _install_fake_openai(monkeypatch, _openai_response("A"))
     assert OpenAIBackend("some-model").supports_mechanistic is False

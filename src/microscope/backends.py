@@ -31,6 +31,9 @@ from . import interp
 # "A", " A", "**A", "A." ... anything whose first letter-ish character is the answer.
 _LETTER_RE = re.compile(r"\b([AB])\b")
 
+# The OpenAI endpoint caps top_logprobs at 5.
+TOP_LOGPROBS = 5
+
 
 @dataclass
 class Measurement:
@@ -159,17 +162,14 @@ class OpenAIBackend:
         if self.reasoning_effort:
             request["reasoning_effort"] = self.reasoning_effort
         else:
-            # Only meaningful on non-reasoning models; requested separately so a refusal to
-            # honour it does not also cost us the answer.
             request["logprobs"] = True
-            request["top_logprobs"] = 20
+            # Five is the endpoint's ceiling, and it is ample: this is a two-option forced
+            # choice, so "A" and "B" are the top two candidates whenever the model is
+            # answering the question at all. If they are not in the top five, the run has a
+            # bigger problem than resolution, and the parse_rate check will say so.
+            request["top_logprobs"] = TOP_LOGPROBS
 
-        try:
-            response = self._client.chat.completions.create(**request)
-        except TypeError:
-            request.pop("logprobs", None)
-            request.pop("top_logprobs", None)
-            response = self._client.chat.completions.create(**request)
+        response = self._create_with_logprob_fallback(request)
 
         choice = response.choices[0]
         text = (choice.message.content or "").strip()
@@ -192,6 +192,25 @@ class OpenAIBackend:
             parse_ok=parse_ok,
             probability_source="logprobs",
         )
+
+    def _create_with_logprob_fallback(self, request: dict):
+        """Send the request, and retry without logprobs if the model refuses them.
+
+        Model families differ on whether they return logprobs and on the permitted
+        ``top_logprobs`` ceiling, and both show up as a 400 rather than a client-side error. A
+        run of 200-odd calls must not die on that: the answer letter is still readable from the
+        text, and ``probability_source`` records that this row is binary-only.
+        """
+        try:
+            return self._client.chat.completions.create(**request)
+        except TypeError:
+            pass
+        except Exception as exc:
+            if "logprob" not in str(exc).lower():
+                raise
+        request.pop("logprobs", None)
+        request.pop("top_logprobs", None)
+        return self._client.chat.completions.create(**request)
 
     @staticmethod
     def _letter_mass_from_logprobs(choice) -> tuple[float, float] | None:
