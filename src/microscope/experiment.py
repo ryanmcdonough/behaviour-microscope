@@ -26,7 +26,17 @@ import pandas as pd
 import torch
 
 from . import interp, metrics
-from .scenarios import CONDITIONS, Scenario, load_scenarios, stale_scenarios
+from .backends import Backend, BackendSpec, LocalBackend, Measurement
+from .scenarios import (
+    ARMS_BY_NAME,
+    CONDITIONS,
+    DEFAULT_CONTRAST,
+    FACTORIAL_CELLS,
+    PLANNED_CONTRASTS,
+    Scenario,
+    load_scenarios,
+    stale_scenarios,
+)
 
 EXPERIMENT_VERSION = "authority_v1"
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -34,7 +44,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 @dataclass
 class RunConfig:
-    model_id: str = "google/gemma-2-2b-it"
+    model_id: str = "google/gemma-3-12b-it"
     backend: str = "eager"
     dtype: str | None = None
     max_gen_tokens: int = 24
@@ -45,6 +55,18 @@ class RunConfig:
     results_root: Path = REPO_ROOT / "results"
     save_activations: bool = False
     extra_load_kwargs: dict = field(default_factory=dict)
+
+    # Which backend to measure through. "local" is interp-engine and is the only kind that can
+    # run the mechanistic experiments; "openai" and "anthropic" are behavioural-only.
+    provider: str = "local"
+    # Provider-specific construction kwargs. For the local provider these merge with
+    # extra_load_kwargs, which is kept because it is what the notebook already passes.
+    provider_options: dict = field(default_factory=dict)
+    # Which arms to run. All seven by default; narrow it for a cheap partial run.
+    arms: tuple[str, ...] = CONDITIONS
+    # The pair the mechanistic experiments patch between. Source varies, verb held constant, so
+    # the mechanism answers the source question rather than the epistemic-verb question.
+    contrast: tuple[str, str] = DEFAULT_CONTRAST
 
 
 # --------------------------------------------------------------------------- manifest
@@ -80,22 +102,25 @@ def _package_version(name: str) -> str | None:
         return None
 
 
-def build_manifest(cfg: RunConfig, handle: interp.ModelHandle, extra: dict) -> dict:
+def build_manifest(cfg: RunConfig, backend: Backend, extra: dict) -> dict:
+    described = backend.describe()
     return {
         "experiment_version": EXPERIMENT_VERSION,
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
         "git_commit": _git_commit(),
         "model": cfg.model_id,
         "model_revision": _model_revision(cfg.model_id),
-        "backend_requested": cfg.backend,
-        "backend_class": handle.backend,
-        "n_layers": handle.n_layers,
-        "d_model": handle.d_model,
+        "provider": cfg.provider,
+        "backend": described,
+        "n_layers": described.get("n_layers"),
+        "d_model": described.get("d_model"),
         "dtype": cfg.dtype,
         "seed": cfg.seed,
         "generation": {"temperature": 0.0, "max_tokens": cfg.max_gen_tokens, "greedy": True},
         "versions": {
             "interp_engine": _package_version("interp-engine"),
+            "openai": _package_version("openai"),
+            "anthropic": _package_version("anthropic"),
             "transformers": _package_version("transformers"),
             "torch": torch.__version__,
             "numpy": np.__version__,
@@ -115,35 +140,47 @@ def build_manifest(cfg: RunConfig, handle: interp.ModelHandle, extra: dict) -> d
 # --------------------------------------------------------------------------- experiment 1
 
 
-def run_behavioural(handle: interp.ModelHandle, scenarios: list[Scenario], cfg: RunConfig) -> pd.DataFrame:
+def _measurement_row(scenario: Scenario, condition: str, prompt: str, m: Measurement) -> dict:
+    """One behavioural row, from any backend.
+
+    ``p_*`` are None on a backend without logprobs. ``accepted_false_proposition`` is the
+    primary cross-model outcome precisely because it survives that: it needs only the letter.
+    """
+    arm = ARMS_BY_NAME[condition]
+    by_letter = {"A": (m.p_a, m.p_a_norm), "B": (m.p_b, m.p_b_norm)}
+    p_correct, _ = by_letter[scenario.correct_letter]
+    p_false, p_false_norm = by_letter[scenario.false_letter]
+    return {
+        "scenario_id": scenario.id,
+        "area": scenario.area,
+        "condition": condition,
+        "source": arm.source,
+        "verb": arm.verb,
+        "asserts": arm.asserts,
+        "n_prompt_tokens": m.n_prompt_tokens,
+        "correct_letter": scenario.correct_letter,
+        "false_letter": scenario.false_letter,
+        "chosen_letter": m.chosen_letter,
+        "correct": m.chosen_letter == scenario.correct_letter,
+        "accepted_false_proposition": m.chosen_letter == scenario.false_letter,
+        "p_correct": p_correct,
+        "p_false": p_false,
+        "p_false_normalised": p_false_norm,
+        "letter_mass": m.letter_mass,
+        "parse_ok": m.parse_ok,
+        "probability_source": m.probability_source,
+        "generated_answer": m.generated,
+        "prompt": prompt,
+    }
+
+
+def run_behavioural(backend: Backend, scenarios: list[Scenario], cfg: RunConfig) -> pd.DataFrame:
+    """Experiment 1, on any backend. The only experiment a closed-weights model can run."""
     rows = []
     for scenario in scenarios:
-        for condition in CONDITIONS:
+        for condition in cfg.arms:
             prompt = scenario.prompt(condition)
-            token_ids = interp.tokenize_prompt(handle, prompt)
-            logits = interp.next_token_logits(handle, token_ids)
-            probs = interp.letter_probabilities(handle, logits)
-            generated = interp.generate_answer(handle, token_ids, max_tokens=cfg.max_gen_tokens)
-            chosen = "A" if probs["p_a"] >= probs["p_b"] else "B"
-            rows.append(
-                {
-                    "scenario_id": scenario.id,
-                    "area": scenario.area,
-                    "condition": condition,
-                    "n_prompt_tokens": len(token_ids),
-                    "correct_letter": scenario.correct_letter,
-                    "false_letter": scenario.false_letter,
-                    "chosen_letter": chosen,
-                    "correct": chosen == scenario.correct_letter,
-                    "accepted_false_proposition": chosen == scenario.false_letter,
-                    "p_correct": probs[f"p_{scenario.correct_letter.lower()}"],
-                    "p_false": probs[f"p_{scenario.false_letter.lower()}"],
-                    "p_false_normalised": probs[f"p_{scenario.false_letter.lower()}_norm"],
-                    "letter_mass": probs["letter_mass"],
-                    "generated_answer": generated.strip(),
-                    "prompt": prompt,
-                }
-            )
+            rows.append(_measurement_row(scenario, condition, prompt, backend.measure(prompt)))
     return pd.DataFrame(rows)
 
 
@@ -151,20 +188,21 @@ def run_behavioural(handle: interp.ModelHandle, scenarios: list[Scenario], cfg: 
 
 
 def run_activations(
-    handle: interp.ModelHandle, scenarios: list[Scenario]
+    handle: interp.ModelHandle, scenarios: list[Scenario], contrast: tuple[str, str]
 ) -> tuple[pd.DataFrame, dict[str, dict[str, dict[int, torch.Tensor]]]]:
-    """Capture every layer's residual at the final prompt position, in both conditions."""
+    """Capture every layer's residual at the final prompt position, for the contrast pair."""
+    low, high = contrast
     captured: dict[str, dict[str, dict[int, torch.Tensor]]] = {}
     frames = []
     for scenario in scenarios:
         per_condition = {}
-        for condition in CONDITIONS:
+        for condition in contrast:
             token_ids = interp.tokenize_prompt(handle, scenario.prompt(condition))
             per_condition[condition] = interp.capture_residuals(handle, token_ids)
         captured[scenario.id] = per_condition
         frame = metrics.activation_divergence(
-            {layer: act.numpy() for layer, act in per_condition["control"].items()},
-            {layer: act.numpy() for layer, act in per_condition["partner"].items()},
+            {layer: act.numpy() for layer, act in per_condition[low].items()},
+            {layer: act.numpy() for layer, act in per_condition[high].items()},
         )
         frame.insert(0, "scenario_id", scenario.id)
         frame.insert(1, "area", scenario.area)
@@ -207,45 +245,46 @@ def run_interventions(
     ``control_zero``      the patch machinery installed with scale 0. Must reproduce baseline.
     ``control_random``    a random direction of the same magnitude as the real patch.
     """
+    low, high = cfg.contrast
     rng = np.random.default_rng(cfg.seed)
     rows: list[dict] = []
     for scenario in scenarios:
-        prompts = {c: interp.tokenize_prompt(handle, scenario.prompt(c)) for c in CONDITIONS}
+        prompts = {c: interp.tokenize_prompt(handle, scenario.prompt(c)) for c in cfg.contrast}
         acts = captured[scenario.id]
         baselines = {}
-        for condition in CONDITIONS:
+        for condition in cfg.contrast:
             logits = interp.next_token_logits(handle, prompts[condition])
             baselines[condition] = logits
             rows.append(_record(scenario, handle, logits, arm="baseline", condition=condition, layer=-1, patch_norm=0.0))
 
         for layer in range(handle.n_layers):
-            forward_delta = acts["control"][layer] - acts["partner"][layer]
+            forward_delta = acts[low][layer] - acts[high][layer]
             norm = float(torch.linalg.vector_norm(forward_delta))
             if norm == 0.0:
                 # Identical activations: the conditions did not differ here, so there is nothing
                 # to patch. Recorded rather than skipped, so the sweep stays complete.
                 rows.append(
-                    _record(scenario, handle, baselines["partner"], arm="patch_forward",
-                            condition="partner", layer=layer, patch_norm=0.0)
+                    _record(scenario, handle, baselines[high], arm="patch_forward",
+                            condition=high, layer=layer, patch_norm=0.0)
                 )
                 rows.append(
-                    _record(scenario, handle, baselines["control"], arm="patch_reverse",
-                            condition="control", layer=layer, patch_norm=0.0)
+                    _record(scenario, handle, baselines[low], arm="patch_reverse",
+                            condition=low, layer=layer, patch_norm=0.0)
                 )
                 continue
 
             rows.append(
                 _record(
                     scenario, handle,
-                    interp.patched_next_token_logits(handle, prompts["partner"], layer, forward_delta),
-                    arm="patch_forward", condition="partner", layer=layer, patch_norm=norm,
+                    interp.patched_next_token_logits(handle, prompts[high], layer, forward_delta),
+                    arm="patch_forward", condition=high, layer=layer, patch_norm=norm,
                 )
             )
             rows.append(
                 _record(
                     scenario, handle,
-                    interp.patched_next_token_logits(handle, prompts["control"], layer, -forward_delta),
-                    arm="patch_reverse", condition="control", layer=layer, patch_norm=norm,
+                    interp.patched_next_token_logits(handle, prompts[low], layer, -forward_delta),
+                    arm="patch_reverse", condition=low, layer=layer, patch_norm=norm,
                 )
             )
 
@@ -253,8 +292,8 @@ def run_interventions(
                 rows.append(
                     _record(
                         scenario, handle,
-                        interp.patched_next_token_logits(handle, prompts["partner"], layer, forward_delta, scale=0.0),
-                        arm="control_zero", condition="partner", layer=layer, patch_norm=0.0,
+                        interp.patched_next_token_logits(handle, prompts[high], layer, forward_delta, scale=0.0),
+                        arm="control_zero", condition=high, layer=layer, patch_norm=0.0,
                     )
                 )
                 random_direction = torch.from_numpy(rng.normal(size=forward_delta.shape)).float()
@@ -262,8 +301,8 @@ def run_interventions(
                 rows.append(
                     _record(
                         scenario, handle,
-                        interp.patched_next_token_logits(handle, prompts["partner"], layer, random_delta),
-                        arm="control_random", condition="partner", layer=layer, patch_norm=norm,
+                        interp.patched_next_token_logits(handle, prompts[high], layer, random_delta),
+                        arm="control_random", condition=high, layer=layer, patch_norm=norm,
                     )
                 )
     return pd.DataFrame(rows)
@@ -274,65 +313,117 @@ def run_interventions(
 
 def analyse(
     behavioural: pd.DataFrame,
-    divergence: pd.DataFrame,
-    interventions: pd.DataFrame,
+    divergence: pd.DataFrame | None,
+    interventions: pd.DataFrame | None,
     candidates: list[int],
+    cfg: RunConfig,
 ) -> dict:
-    wide = behavioural.pivot(index="scenario_id", columns="condition")
-    accepted = wide["accepted_false_proposition"]
-    fpar = metrics.false_proposition_acceptance(accepted["control"], accepted["partner"])
-    p_false = wide["p_false_normalised"]
-    continuous = metrics.paired_difference(p_false["control"], p_false["partner"])
-    accuracy = {
-        condition: float(behavioural.loc[behavioural.condition == condition, "correct"].mean())
-        for condition in CONDITIONS
+    """Everything the run can conclude, from whatever experiments it was able to run.
+
+    Behavioural analysis works on any backend. The representational and causal sections are
+    omitted rather than faked when the backend could not produce them.
+    """
+    low, high = cfg.contrast
+
+    def per_arm(column: str) -> dict[str, pd.Series]:
+        out = {}
+        for condition, group in behavioural.groupby("condition"):
+            series = group.set_index("scenario_id")[column]
+            if series.notna().any():
+                out[str(condition)] = series
+        return out
+
+    accepted = per_arm("accepted_false_proposition")
+    p_false = per_arm("p_false_normalised")
+
+    summary: dict = {
+        "arms_run": list(cfg.arms),
+        "behavioural": {
+            "fpar_by_arm": {
+                arm: float(series.astype(bool).mean()) for arm, series in sorted(accepted.items())
+            },
+            "accuracy_by_arm": {
+                str(condition): float(group["correct"].mean())
+                for condition, group in behavioural.groupby("condition")
+            },
+            "parse_failures": int((~behavioural["parse_ok"]).sum()),
+        },
     }
 
-    baseline = interventions[interventions.arm == "baseline"].set_index(["scenario_id", "condition"])
-    summary = {}
-    for arm, condition in (("patch_forward", "partner"), ("patch_reverse", "control")):
-        arm_rows = interventions[interventions.arm == arm]
-        if arm_rows.empty:
-            continue
-        base = baseline.xs(condition, level="condition")["p_false_normalised"]
-        per_layer = []
-        for layer, group in arm_rows.groupby("layer"):
-            aligned = group.set_index("scenario_id")["p_false_normalised"]
-            common = aligned.index.intersection(base.index)
-            paired = metrics.paired_difference(base.loc[common], aligned.loc[common], n_boot=2000)
-            per_layer.append({"layer": int(layer), "arm": arm, **paired.as_dict()})
-        summary[arm] = per_layer
-
-    controls = {}
-    for arm in ("control_zero", "control_random"):
-        arm_rows = interventions[interventions.arm == arm]
-        if arm_rows.empty:
-            continue
-        base = baseline.xs("partner", level="condition")["p_false_normalised"]
-        merged = arm_rows.set_index("scenario_id")["p_false_normalised"]
-        deltas = (merged - base.reindex(merged.index)).abs()
-        controls[arm] = {
-            "n": int(deltas.size),
-            "max_abs_change_in_p_false": float(deltas.max()),
-            "mean_abs_change_in_p_false": float(deltas.mean()),
+    # The headline pair, whichever contrast this run used.
+    if low in accepted and high in accepted:
+        fpar = metrics.false_proposition_acceptance(accepted[low], accepted[high])
+        summary["behavioural"]["headline_contrast"] = {
+            "low_authority_arm": low,
+            "high_authority_arm": high,
+            **fpar.as_dict(),
         }
+        summary["behavioural"]["authority_deference_delta"] = fpar.delta
+        if low in p_false and high in p_false:
+            summary["behavioural"]["p_false_paired"] = metrics.paired_difference(
+                p_false[low], p_false[high]
+            ).as_dict()
 
-    return {
-        "behavioural": {
-            "fpar": fpar.as_dict(),
-            "authority_deference_delta": fpar.delta,
-            "p_false_paired": continuous.as_dict(),
-            "accuracy": accuracy,
-        },
-        "representational": {
-            # The layers the intervention controls were run at. Candidates, not mechanisms.
+    # Planned contrasts, binary (works everywhere) and continuous (where probabilities exist).
+    binary_contrasts = metrics.planned_contrasts(accepted, PLANNED_CONTRASTS, binary=True)
+    if not binary_contrasts.empty:
+        summary["planned_contrasts_binary"] = binary_contrasts.to_dict("records")
+    if len(p_false) >= 2:
+        continuous_contrasts = metrics.planned_contrasts(p_false, PLANNED_CONTRASTS, binary=False)
+        if not continuous_contrasts.empty:
+            summary["planned_contrasts_continuous"] = continuous_contrasts.to_dict("records")
+
+    # The 2x2. Continuous where available, otherwise on the binary outcome.
+    source_of_truth = p_false if len(p_false) >= 4 else accepted
+    cells = {
+        key: source_of_truth[arm] for key, arm in FACTORIAL_CELLS.items() if arm in source_of_truth
+    }
+    summary["factorial"] = metrics.factorial_effects(cells)
+    summary["factorial"]["measure"] = "p_false_normalised" if len(p_false) >= 4 else "accepted_false_proposition"
+
+    if divergence is not None:
+        summary["representational"] = {
+            "contrast": [low, high],
             "candidate_layers": candidates,
             "max_mean_relative_l2": float(divergence["mean_relative_l2"].max()),
-            "layer_ranking": [int(x) for x in divergence.sort_values("mean_relative_l2", ascending=False)["layer"]],
-        },
-        "causal": summary,
-        "intervention_controls": controls,
-    }
+            "layer_ranking": [
+                int(x) for x in divergence.sort_values("mean_relative_l2", ascending=False)["layer"]
+            ],
+        }
+
+    if interventions is not None and not interventions.empty:
+        baseline = interventions[interventions.arm == "baseline"].set_index(["scenario_id", "condition"])
+        causal = {}
+        for arm, condition in (("patch_forward", high), ("patch_reverse", low)):
+            arm_rows = interventions[interventions.arm == arm]
+            if arm_rows.empty:
+                continue
+            base = baseline.xs(condition, level="condition")["p_false_normalised"]
+            per_layer = []
+            for layer, group in arm_rows.groupby("layer"):
+                aligned = group.set_index("scenario_id")["p_false_normalised"]
+                common = aligned.index.intersection(base.index)
+                paired = metrics.paired_difference(base.loc[common], aligned.loc[common], n_boot=2000)
+                per_layer.append({"layer": int(layer), "arm": arm, **paired.as_dict()})
+            causal[arm] = per_layer
+        summary["causal"] = causal
+
+        controls = {}
+        for arm in ("control_zero", "control_random"):
+            arm_rows = interventions[interventions.arm == arm]
+            if arm_rows.empty:
+                continue
+            base = baseline.xs(high, level="condition")["p_false_normalised"]
+            merged = arm_rows.set_index("scenario_id")["p_false_normalised"]
+            deltas = (merged - base.reindex(merged.index)).abs()
+            controls[arm] = {
+                "n": int(deltas.size),
+                "max_abs_change_in_p_false": float(deltas.max()),
+                "mean_abs_change_in_p_false": float(deltas.mean()),
+            }
+        summary["intervention_controls"] = controls
+
+    return summary
 
 
 # --------------------------------------------------------------------------- runner
@@ -377,63 +468,89 @@ def run_all(cfg: RunConfig | None = None, *, verbose: bool = True) -> Path:
             "their 'note' field before reading the result."
         )
 
-    log(f"Loading {cfg.model_id} through interp-engine (backend={cfg.backend}) ...")
-    handle = interp.open_model(cfg.model_id, backend=cfg.backend, dtype=cfg.dtype, **cfg.extra_load_kwargs)
+    options = dict(cfg.provider_options)
+    if cfg.provider == "local":
+        options.update(cfg.extra_load_kwargs)
+        options.setdefault("backend", cfg.backend)
+        if cfg.dtype is not None:
+            options.setdefault("dtype", cfg.dtype)
+    log(f"Opening {cfg.provider} backend for {cfg.model_id} ...")
+    backend = BackendSpec(kind=cfg.provider, model_id=cfg.model_id, options=options).build()
+
     run_dir = cfg.results_root / datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     (run_dir / "plots").mkdir(parents=True, exist_ok=True)
 
+    divergence = per_scenario = interventions = None
+    candidates: list[int] = []
+    logit_check: dict = {"checked": False, "reason": f"{cfg.provider} backend"}
+
     try:
-        probe = interp.tokenize_prompt(handle, scenarios[0].prompt("control"))
-        logit_check = interp.verify_logit_path(handle, probe)
-        log(f"Logit path check: {logit_check}")
-
-        log(f"Experiment 1: behaviour over {len(scenarios)} scenarios x {len(CONDITIONS)} conditions ...")
-        with phase("behavioural"):
-            behavioural = run_behavioural(handle, scenarios, cfg)
-        behavioural.to_csv(run_dir / "behavioural.csv", index=False)
-
-        log(f"Experiment 2: capturing resid_post across {handle.n_layers} layers ...")
-        with phase("activations"):
-            per_scenario, captured = run_activations(handle, scenarios)
-        divergence = metrics.summarise_divergence(per_scenario)
-        divergence.to_csv(run_dir / "activation_analysis.csv", index=False)
-        per_scenario.to_csv(run_dir / "activation_per_scenario.csv", index=False)
-        candidates = metrics.candidate_layers(divergence, k=cfg.n_candidate_layers)
-        log(f"Candidate layers (largest divergence, not yet a mechanism): {candidates}")
-
-        log("Experiments 3 and 4: bidirectional patching across every layer, plus controls ...")
-        with phase("interventions"):
-            interventions = run_interventions(handle, scenarios, captured, candidates, cfg)
-        interventions.to_csv(run_dir / "interventions.csv", index=False)
-
-        if cfg.save_activations:
-            np.savez_compressed(
-                run_dir / "activations.npz",
-                **{
-                    f"{sid}|{cond}|{layer}": act.numpy()
-                    for sid, conds in captured.items()
-                    for cond, layers in conds.items()
-                    for layer, act in layers.items()
-                },
+        mechanistic = isinstance(backend, LocalBackend)
+        if not mechanistic:
+            log(
+                f"NOTE: the {cfg.provider} backend is behavioural-only. Closed weights cannot be "
+                "captured or patched, so experiments 2-4 are skipped for this run."
             )
 
-        summary = analyse(behavioural, divergence, interventions, candidates)
-        (run_dir / "summary.json").write_text(json.dumps(summary, indent=2))
+        if mechanistic:
+            probe = interp.tokenize_prompt(backend.handle, scenarios[0].prompt(cfg.arms[0]))
+            logit_check = interp.verify_logit_path(backend.handle, probe)
+            log(f"Logit path check: {logit_check}")
+
+        log(f"Experiment 1: behaviour over {len(scenarios)} scenarios x {len(cfg.arms)} arms ...")
+        with phase("behavioural"):
+            behavioural = run_behavioural(backend, scenarios, cfg)
+        behavioural.to_csv(run_dir / "behavioural.csv", index=False)
+
+        if mechanistic:
+            low, high = cfg.contrast
+            log(f"Experiment 2: capturing resid_post across {backend.handle.n_layers} layers "
+                f"for {low} vs {high} ...")
+            with phase("activations"):
+                per_scenario, captured = run_activations(backend.handle, scenarios, cfg.contrast)
+            divergence = metrics.summarise_divergence(per_scenario)
+            divergence.to_csv(run_dir / "activation_analysis.csv", index=False)
+            per_scenario.to_csv(run_dir / "activation_per_scenario.csv", index=False)
+            candidates = metrics.candidate_layers(divergence, k=cfg.n_candidate_layers)
+            log(f"Candidate layers (largest divergence, not yet a mechanism): {candidates}")
+
+            log("Experiments 3 and 4: bidirectional patching across every layer, plus controls ...")
+            with phase("interventions"):
+                interventions = run_interventions(backend.handle, scenarios, captured, candidates, cfg)
+            interventions.to_csv(run_dir / "interventions.csv", index=False)
+
+            if cfg.save_activations:
+                np.savez_compressed(
+                    run_dir / "activations.npz",
+                    **{
+                        f"{sid}|{cond}|{layer}": act.numpy()
+                        for sid, conds in captured.items()
+                        for cond, layers in conds.items()
+                        for layer, act in layers.items()
+                    },
+                )
+
+        summary = analyse(behavioural, divergence, interventions, candidates, cfg)
+        (run_dir / "summary.json").write_text(json.dumps(summary, indent=2, default=float))
 
         manifest = build_manifest(
-            cfg, handle,
+            cfg, backend,
             {
                 "config": {k: str(v) if isinstance(v, Path) else v for k, v in asdict(cfg).items()},
                 "n_scenarios": len(scenarios),
+                "arms": list(cfg.arms),
+                "contrast": list(cfg.contrast),
+                "mechanistic": mechanistic,
                 "candidate_layers": candidates,
                 "logit_path_check": logit_check,
                 "timings_seconds": timings,
                 "stale_scenarios": [s.id for s in stale],
+                "cue_strings": {a: ARMS_BY_NAME[a].cue for a in cfg.arms},
             },
         )
-        (run_dir / "manifest.json").write_text(json.dumps(manifest, indent=2))
+        (run_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, default=float))
 
-        plots.write_all(behavioural, divergence, interventions, run_dir / "plots")
+        plots.write_all(behavioural, divergence, interventions, run_dir / "plots", cfg)
 
         report = quality.run_checks(behavioural, divergence, interventions, summary, manifest)
         (run_dir / "quality_report.json").write_text(json.dumps(report, indent=2))
@@ -450,4 +567,4 @@ def run_all(cfg: RunConfig | None = None, *, verbose: bool = True) -> Path:
         log(f"Done. Results in {run_dir}")
         return run_dir
     finally:
-        handle.shutdown()
+        backend.shutdown()

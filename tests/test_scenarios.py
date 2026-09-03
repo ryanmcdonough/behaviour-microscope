@@ -2,7 +2,16 @@
 
 import pytest
 
-from microscope.scenarios import CONDITIONS, CUES, load_scenarios, stale_scenarios
+from microscope.scenarios import (
+    ARMS,
+    ARMS_BY_NAME,
+    CONDITIONS,
+    DEFAULT_CONTRAST,
+    FACTORIAL_CELLS,
+    PLANNED_CONTRASTS,
+    load_scenarios,
+    stale_scenarios,
+)
 
 SCENARIOS = load_scenarios()
 
@@ -30,21 +39,63 @@ def test_correct_letter_is_stable_and_not_all_one_side():
     assert [s.correct_letter for s in load_scenarios()] == letters, "assignment must be deterministic"
 
 
-def test_prompt_pair_differs_only_in_the_authority_cue():
+def test_asserting_arms_differ_only_in_the_cue_sentence():
+    """Every assertion arm must be reachable from any other by swapping one sentence."""
     for s in SCENARIOS:
-        pair = s.prompt_pair()
-        control, partner = pair["control"], pair["partner"]
-        assert control != partner
-        assert control.replace(CUES["control"], CUES["partner"]) == partner, s.id
+        prompts = s.prompts()
+        base = prompts["junior_said"]
+        for name, arm in ARMS_BY_NAME.items():
+            if not arm.asserts or name == "junior_said":
+                continue
+            swapped = base.replace(ARMS_BY_NAME["junior_said"].cue, arm.cue)
+            assert swapped == prompts[name], f"{s.id} / {name}"
 
 
-def test_both_propositions_appear_as_options_in_both_conditions():
+def test_the_factorial_is_a_real_two_by_two():
+    """Each cell must vary exactly one thing from its neighbours."""
+    assert set(FACTORIAL_CELLS) == {
+        ("junior", "said"), ("junior", "confirmed"),
+        ("partner", "said"), ("partner", "confirmed"),
+    }
+    # Verb held constant down a column, source held constant along a row.
+    for verb in ("said", "confirmed"):
+        junior = ARMS_BY_NAME[FACTORIAL_CELLS[("junior", verb)]]
+        partner = ARMS_BY_NAME[FACTORIAL_CELLS[("partner", verb)]]
+        assert junior.verb == partner.verb == verb
+        assert junior.source != partner.source
+
+
+def test_the_floor_arm_asserts_nothing_but_still_offers_both_options():
+    for s in SCENARIOS:
+        floor = s.prompt("floor")
+        assert "ADDITIONAL INFORMATION" not in floor, s.id
+        assert s.correct_proposition in floor, s.id
+        # The false proposition appears exactly once -- as an option, never as an assertion.
+        assert floor.count(s.false_proposition) == 1, s.id
+
+
+def test_the_default_contrast_holds_the_verb_constant():
+    """The mechanistic pair must isolate source, or the mechanism answers the wrong question."""
+    low, high = (ARMS_BY_NAME[name] for name in DEFAULT_CONTRAST)
+    assert low.verb == high.verb
+    assert low.source != high.source
+
+
+def test_every_planned_contrast_names_real_arms():
+    for arm_a, arm_b, isolates in PLANNED_CONTRASTS:
+        assert arm_a in ARMS_BY_NAME, arm_a
+        assert arm_b in ARMS_BY_NAME, arm_b
+        assert isolates
+
+
+def test_both_propositions_appear_as_options_in_every_arm():
     for s in SCENARIOS:
         for condition in CONDITIONS:
             prompt = s.prompt(condition)
             assert s.correct_proposition in prompt, s.id
             assert s.false_proposition in prompt, s.id
-            assert prompt.count(s.false_proposition) == 2, "cue sentence + option"
+            expected = 2 if ARMS_BY_NAME[condition].asserts else 1
+            assert prompt.count(s.false_proposition) == expected, f"{s.id}/{condition}"
 
 
 def test_unknown_condition_is_refused():

@@ -182,3 +182,122 @@ def candidate_layers(divergence: pd.DataFrame, k: int = 4) -> list[int]:
     out clean.
     """
     return [int(layer) for layer in divergence.nlargest(k, "mean_relative_l2")["layer"]]
+
+
+# --------------------------------------------------------------------------- factorial
+
+
+def holm_correction(pvalues: list[float]) -> list[float]:
+    """Holm-Bonferroni adjusted p-values, in the input order.
+
+    The planned contrasts are decided before the data is seen, but there are seven of them, and
+    reporting seven uncorrected tests is how a null result is made to look like a finding. Holm
+    is used rather than Bonferroni because it is uniformly more powerful at the same family-wise
+    error rate, and rather than FDR because these are confirmatory tests of specific hypotheses.
+    """
+    indexed = sorted(enumerate(pvalues), key=lambda pair: pair[1])
+    n = len(pvalues)
+    adjusted = [0.0] * n
+    running = 0.0
+    for rank, (original_index, p) in enumerate(indexed):
+        running = max(running, (n - rank) * p)
+        adjusted[original_index] = min(1.0, running)
+    return adjusted
+
+
+def planned_contrasts(
+    per_arm: dict[str, "pd.Series"],
+    contrasts,
+    *,
+    binary: bool = False,
+) -> pd.DataFrame:
+    """Run each planned contrast as a paired test and Holm-correct the family.
+
+    ``per_arm`` maps arm name to a Series indexed by scenario id. Arms absent from the run are
+    skipped rather than faked, so a behavioural-only or partial run still reports what it has.
+    """
+    rows = []
+    for arm_a, arm_b, isolates in contrasts:
+        if arm_a not in per_arm or arm_b not in per_arm:
+            continue
+        a, b = per_arm[arm_a], per_arm[arm_b]
+        common = a.index.intersection(b.index)
+        if len(common) == 0:
+            continue
+        a, b = a.loc[common], b.loc[common]
+        if binary:
+            result = false_proposition_acceptance(a.astype(bool), b.astype(bool))
+            rows.append({
+                "arm_a": arm_a, "arm_b": arm_b, "isolates": isolates, "n": result.n,
+                "rate_a": result.rate_control, "rate_b": result.rate_partner,
+                "difference": result.delta, "p_value": result.mcnemar_exact_p,
+                "test": "mcnemar_exact",
+            })
+        else:
+            result = paired_difference(a.astype(float), b.astype(float), n_boot=4000)
+            rows.append({
+                "arm_a": arm_a, "arm_b": arm_b, "isolates": isolates, "n": result.n,
+                "rate_a": result.mean_a, "rate_b": result.mean_b,
+                "difference": result.mean_difference, "ci_low": result.ci_low,
+                "ci_high": result.ci_high, "p_value": result.wilcoxon_p,
+                "cohens_dz": result.cohens_dz, "test": "wilcoxon",
+            })
+    if not rows:
+        return pd.DataFrame()
+    frame = pd.DataFrame(rows)
+    frame["p_holm"] = holm_correction(frame["p_value"].tolist())
+    frame["significant_holm_05"] = frame["p_holm"] < 0.05
+    return frame
+
+
+def factorial_effects(cells: dict[tuple[str, str], "pd.Series"]) -> dict:
+    """Main effects and interaction for the 2x2, computed within scenario.
+
+    ``cells`` maps ``(source, verb)`` to a per-scenario Series. Every quantity is a paired
+    contrast over the same scenarios, so this is a within-items analysis rather than a
+    between-groups ANOVA -- the design is fully crossed within each scenario, which is what
+    makes n=30 workable.
+
+    The interaction is the one to read first when the two main effects disagree: a large
+    interaction means source and verb are not additive, and the headline "authority effect"
+    depends on which verb carries it.
+    """
+    required = [("junior", "said"), ("junior", "confirmed"), ("partner", "said"), ("partner", "confirmed")]
+    if not all(cell in cells for cell in required):
+        return {"available": False, "reason": "not all four factorial cells are present in this run"}
+
+    js, jc = cells[("junior", "said")].astype(float), cells[("junior", "confirmed")].astype(float)
+    ps, pc = cells[("partner", "said")].astype(float), cells[("partner", "confirmed")].astype(float)
+    index = js.index.intersection(jc.index).intersection(ps.index).intersection(pc.index)
+    js, jc, ps, pc = js.loc[index], jc.loc[index], ps.loc[index], pc.loc[index]
+
+    # Main effect of source: partner mean minus junior mean, averaging over verb.
+    source = ((ps + pc) / 2) - ((js + jc) / 2)
+    # Main effect of verb: confirmed minus said, averaging over source.
+    verb = ((jc + pc) / 2) - ((js + ps) / 2)
+    # Interaction: does the source effect differ by verb?
+    interaction = (pc - jc) - (ps - js)
+
+    def summarise(diff, label):
+        zero = np.zeros_like(diff.to_numpy(dtype=float))
+        result = paired_difference(zero, diff.to_numpy(dtype=float), n_boot=4000)
+        return {
+            "effect": label,
+            "mean": result.mean_difference,
+            "ci_low": result.ci_low,
+            "ci_high": result.ci_high,
+            "p_value": result.wilcoxon_p,
+            "cohens_dz": result.cohens_dz,
+        }
+
+    return {
+        "available": True,
+        "n": int(len(index)),
+        "cell_means": {
+            "junior_said": float(js.mean()), "junior_confirmed": float(jc.mean()),
+            "partner_said": float(ps.mean()), "partner_confirmed": float(pc.mean()),
+        },
+        "main_effect_source": summarise(source, "source (partner - junior)"),
+        "main_effect_verb": summarise(verb, "verb (confirmed - said)"),
+        "interaction": summarise(interaction, "source x verb"),
+    }

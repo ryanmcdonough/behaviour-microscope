@@ -21,10 +21,22 @@ Thirty matched UK legal scenarios (England and Wales). Each pairs a piece of aut
 material with a false proposition that contradicts it, and generates two prompts that are
 identical except for who is credited with the false proposition:
 
-| condition | cue |
-| --- | --- |
-| `control` | "Someone working on the matter has said:" |
-| `partner` | "The supervising partner has confirmed:" |
+| arm | cue | isolates |
+| --- | --- | --- |
+| `floor` | *(no assertion at all)* | unpressured accuracy — the anchor |
+| `junior_said` | "A junior colleague has said:" | the factorial's reference cell |
+| `junior_confirmed` | "A junior colleague has confirmed:" | the epistemic verb |
+| `partner_said` | "The supervising partner has said:" | **seniority** — the actual hypothesis |
+| `partner_confirmed` | "The supervising partner has confirmed:" | the original two-arm condition |
+| `court` | "The court has held:" | legal, not organisational, authority |
+| `adverse` | "The opposing party asserts:" | whether an adverse source is discounted |
+
+The four middle arms form a 2×2. This matters: the original design compared "partner **confirmed**"
+against "someone **said**", varying source *and* epistemic verb at once, so an effect measured
+across that pair could not be attributed to seniority. Holding the verb constant down each column
+isolates source; holding the source constant along each row isolates verb. The mechanistic
+experiments patch between `junior_said` and `partner_said` by default, so the mechanism answers
+the source question rather than the verb question.
 
 Four experiments run over that pair:
 
@@ -52,20 +64,38 @@ Open [`notebooks/authority_v1_colab.ipynb`](notebooks/authority_v1_colab.ipynb),
 runtime, Run All. The notebook clones this repo, installs dependencies, verifies the GPU and the
 engine, and calls `run_all()`. Everything else lives in `src/`.
 
-The default model `google/gemma-2-2b-it` is a gated checkpoint: accept the licence on Hugging Face
-and set an `HF_TOKEN` Colab secret first. `Qwen/Qwen3-4B` is the ungated alternative.
+The default model `google/gemma-3-12b-it` is a gated checkpoint: accept the licence on Hugging Face
+and set an `HF_TOKEN` Colab secret first. A Colab **A100** (40GB) is enough; a T4 is not.
+`Qwen/Qwen3-4B` is the ungated alternative.
+
+### Cross-model replication
+
+Closed-weights models are **behavioural only** — they cannot be captured or patched, which is
+enforced by the type system rather than by convention (`run_activations` and `run_interventions`
+require a `LocalBackend`).
+
+```python
+run_all(RunConfig(model_id="gpt-5.1", provider="openai"))
+run_all(RunConfig(model_id="claude-opus-5", provider="anthropic",
+                  provider_options={"effort": "low"}))
+```
+
+The Anthropic Messages API exposes no token logprobs, so Claude yields a chosen letter and no
+probability. That is why the **binary** acceptance rate is the primary cross-model measure — it
+needs only the letter — and the continuous probability is secondary-where-available. Pass
+`samples=k` to estimate a proportion empirically instead.
 
 ### Locally
 
 ```bash
-pip install -e '.[dev]'
-pytest                      # 20 tests, no GPU or model needed
+pip install -e '.[dev]'          # add '.[apis]' for the OpenAI and Anthropic backends
+pytest                           # 54 tests, no GPU, model, or API key needed
 ```
 
 ```python
 from microscope.experiment import RunConfig, run_all
 
-run_all(RunConfig(model_id="google/gemma-2-2b-it"))
+run_all(RunConfig(model_id="google/gemma-3-12b-it"))
 ```
 
 A CPU smoke run that exercises every code path in a couple of minutes:

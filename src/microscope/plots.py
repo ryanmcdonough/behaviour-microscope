@@ -10,9 +10,18 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import pandas as pd  # noqa: E402
 
-from .scenarios import CONDITIONS  # noqa: E402
+from .scenarios import ARMS, FACTORIAL_CELLS  # noqa: E402
 
-COLOURS = {"control": "#4C72B0", "partner": "#C44E52"}
+ARM_ORDER = [a.name for a in ARMS]
+ARM_COLOUR = {
+    "floor": "#8C8C8C",
+    "junior_said": "#4C72B0",
+    "junior_confirmed": "#7BA1D1",
+    "partner_said": "#C44E52",
+    "partner_confirmed": "#8C2F39",
+    "court": "#55A868",
+    "adverse": "#B07AA1",
+}
 ARM_COLOURS = {"patch_forward": "#4C72B0", "patch_reverse": "#C44E52", "control_random": "#999999"}
 
 
@@ -26,34 +35,55 @@ def _finish(fig, ax, path: Path, title: str, subtitle: str | None = None) -> Pat
     return path
 
 
-def plot_behaviour(behavioural: pd.DataFrame, path: Path) -> Path:
-    """False proposition acceptance rate in each condition, with the paired scenario detail."""
-    fig, (ax, ax2) = plt.subplots(1, 2, figsize=(10, 4), gridspec_kw={"width_ratios": [1, 1.4]})
-    rates = [behavioural.loc[behavioural.condition == c, "accepted_false_proposition"].mean() for c in CONDITIONS]
-    ax.bar(list(CONDITIONS), rates, color=[COLOURS[c] for c in CONDITIONS], width=0.55)
+def plot_behaviour(behavioural: pd.DataFrame, path: Path, cfg=None) -> Path:
+    """Acceptance rate per arm, with the factorial cells grouped so the 2x2 reads at a glance."""
+    present = [a for a in ARM_ORDER if a in set(behavioural["condition"])]
+    rates = [
+        behavioural.loc[behavioural.condition == a, "accepted_false_proposition"].mean()
+        for a in present
+    ]
+    fig, ax = plt.subplots(figsize=(max(7, 1.35 * len(present)), 4.4))
+    bars = ax.bar(range(len(present)), rates, color=[ARM_COLOUR.get(a, "#4C72B0") for a in present], width=0.62)
     for i, rate in enumerate(rates):
-        ax.text(i, rate, f" {rate:.0%}", va="bottom", ha="center", fontsize=10)
+        ax.text(i, rate, f" {rate:.0%}", va="bottom", ha="center", fontsize=9)
+    ax.set_xticks(range(len(present)))
+    ax.set_xticklabels([a.replace("_", "\n") for a in present], fontsize=9)
     ax.set_ylabel("False proposition acceptance rate")
-    ax.set_ylim(0, max(1.0, max(rates) * 1.25))
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
-    ax.set_title("Acceptance rate", fontsize=10, loc="left")
+    ax.set_ylim(0, max(1.0, (max(rates) if rates else 0) * 1.25))
+    if "floor" in present:
+        floor_rate = rates[present.index("floor")]
+        ax.axhline(floor_rate, color="#333333", linestyle=":", linewidth=1,
+                   label=f"floor, no assertion ({floor_rate:.0%})")
+        ax.legend(fontsize=8, frameon=False)
+    return _finish(fig, ax, path, "Experiment 1: does who said it change the answer?",
+                   "Same law, same question, same options. Only the attribution differs.")
 
-    wide = behavioural.pivot(index="scenario_id", columns="condition", values="p_false_normalised")
-    for scenario_id, row in wide.iterrows():
-        ax2.plot(
-            [0, 1], [row["control"], row["partner"]],
-            color="#C44E52" if row["partner"] > row["control"] else "#4C72B0",
-            alpha=0.5, marker="o", markersize=3, linewidth=1,
-        )
-    ax2.set_xticks([0, 1], list(CONDITIONS))
-    ax2.set_ylabel("P(false proposition), forced choice")
-    ax2.set_xlim(-0.25, 1.25)
-    ax2.axhline(0.5, color="#333333", linestyle=":", linewidth=1)
-    ax2.set_title("Per scenario (red = more deference under authority)", fontsize=10, loc="left")
 
-    return _finish(fig, ax, path, "Experiment 1: does the authority cue change the answer?",
-                   f"{len(wide)} matched UK legal scenarios")
+def plot_factorial(behavioural: pd.DataFrame, path: Path) -> Path:
+    """The 2x2 as an interaction plot: two lines, one per source, across the two verbs."""
+    fig, ax = plt.subplots(figsize=(6.4, 4.4))
+    verbs = ["said", "confirmed"]
+    drawn = False
+    for source, colour in (("junior", "#4C72B0"), ("partner", "#C44E52")):
+        ys = []
+        for verb in verbs:
+            arm = FACTORIAL_CELLS.get((source, verb))
+            subset = behavioural[behavioural.condition == arm] if arm else None
+            ys.append(subset["accepted_false_proposition"].mean() if subset is not None and not subset.empty else float("nan"))
+        if not all(pd.isna(y) for y in ys):
+            ax.plot([0, 1], ys, marker="o", markersize=7, linewidth=2, color=colour, label=source)
+            drawn = True
+    ax.set_xticks([0, 1], verbs)
+    ax.set_xlim(-0.25, 1.25)
+    ax.set_ylim(0, 1)
+    ax.set_xlabel("epistemic verb")
+    ax.set_ylabel("False proposition acceptance rate")
+    if drawn:
+        ax.legend(title="source", fontsize=9, title_fontsize=9, frameon=False)
+    return _finish(
+        fig, ax, path, "The 2x2: is it seniority, or is it the verb?",
+        "Parallel lines mean the effects are additive. A vertical gap is source; a slope is verb.",
+    )
 
 
 def plot_divergence(divergence: pd.DataFrame, path: Path) -> Path:
@@ -74,24 +104,25 @@ def plot_divergence(divergence: pd.DataFrame, path: Path) -> Path:
     )
 
 
-def plot_intervention(interventions: pd.DataFrame, path: Path) -> Path:
-    """Effect on P(false) of patching the control activation into the partner condition."""
-    baseline = interventions[(interventions.arm == "baseline") & (interventions.condition == "partner")]
+def plot_intervention(interventions: pd.DataFrame, path: Path, contrast=("low", "high")) -> Path:
+    """Effect on P(false) of patching the low-authority activation into the high-authority arm."""
+    low, high = contrast
+    baseline = interventions[(interventions.arm == "baseline") & (interventions.condition == high)]
     forward = interventions[interventions.arm == "patch_forward"]
     fig, ax = plt.subplots(figsize=(9, 4.2))
 
     by_layer = forward.groupby("layer")["p_false_normalised"].agg(["mean", "sem"])
-    ax.bar(by_layer.index, by_layer["mean"], color="#4C72B0", width=0.7, label="patched (control -> partner)")
+    ax.bar(by_layer.index, by_layer["mean"], color="#4C72B0", width=0.7, label=f"patched ({low} -> {high})")
     ax.vlines(by_layer.index, by_layer["mean"] - by_layer["sem"], by_layer["mean"] + by_layer["sem"],
               color="#2A4A73", linewidth=1.2)
 
     base = baseline["p_false_normalised"].mean()
-    ax.axhline(base, color="#C44E52", linestyle="--", linewidth=1.4, label=f"unpatched partner ({base:.2f})")
+    ax.axhline(base, color="#C44E52", linestyle="--", linewidth=1.4, label=f"unpatched {high} ({base:.2f})")
     control_base = interventions[
-        (interventions.arm == "baseline") & (interventions.condition == "control")
+        (interventions.arm == "baseline") & (interventions.condition == low)
     ]["p_false_normalised"].mean()
     ax.axhline(control_base, color="#55A868", linestyle=":", linewidth=1.4,
-               label=f"unpatched control ({control_base:.2f})")
+               label=f"unpatched {low} ({control_base:.2f})")
 
     random_arm = interventions[interventions.arm == "control_random"]
     if not random_arm.empty:
@@ -102,16 +133,17 @@ def plot_intervention(interventions: pd.DataFrame, path: Path) -> Path:
     ax.set_xlabel("patched layer (resid_post, final prompt position)")
     ax.set_ylabel("P(false proposition), forced choice")
     ax.legend(fontsize=8, frameon=False)
-    return _finish(fig, ax, path, "Experiment 3: patching the control representation into the authority condition")
+    return _finish(fig, ax, path, f"Experiment 3: patching {low} into {high}")
 
 
-def plot_bidirectional(interventions: pd.DataFrame, path: Path) -> Path:
+def plot_bidirectional(interventions: pd.DataFrame, path: Path, contrast=("low", "high")) -> Path:
     """Both directions on one axis, as a change from each condition's own baseline."""
+    low, high = contrast
     baseline = interventions[interventions.arm == "baseline"].groupby("condition")["p_false_normalised"].mean()
     fig, ax = plt.subplots(figsize=(9, 4.2))
     for arm, condition, label in (
-        ("patch_forward", "partner", "control -> partner (expect a decrease)"),
-        ("patch_reverse", "control", "partner -> control (expect an increase)"),
+        ("patch_forward", high, f"{low} -> {high} (expect a decrease)"),
+        ("patch_reverse", low, f"{high} -> {low} (expect an increase)"),
     ):
         rows = interventions[interventions.arm == arm]
         if rows.empty:
@@ -130,13 +162,18 @@ def plot_bidirectional(interventions: pd.DataFrame, path: Path) -> Path:
     )
 
 
-def write_all(behavioural: pd.DataFrame, divergence: pd.DataFrame, interventions: pd.DataFrame,
-              out_dir: Path) -> list[Path]:
+def write_all(behavioural, divergence, interventions, out_dir: Path, cfg=None) -> list[Path]:
+    """Every figure the run has data for. Mechanistic plots are skipped, not faked, when absent."""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    return [
+    contrast = tuple(getattr(cfg, "contrast", ("junior_said", "partner_said")))
+    written = [
         plot_behaviour(behavioural, out_dir / "1_behaviour.png"),
-        plot_divergence(divergence, out_dir / "2_activation_divergence.png"),
-        plot_intervention(interventions, out_dir / "3_intervention_by_layer.png"),
-        plot_bidirectional(interventions, out_dir / "4_bidirectional_intervention.png"),
+        plot_factorial(behavioural, out_dir / "2_factorial.png"),
     ]
+    if divergence is not None and not divergence.empty:
+        written.append(plot_divergence(divergence, out_dir / "3_activation_divergence.png"))
+    if interventions is not None and not interventions.empty:
+        written.append(plot_intervention(interventions, out_dir / "4_intervention_by_layer.png", contrast))
+        written.append(plot_bidirectional(interventions, out_dir / "5_bidirectional_intervention.png", contrast))
+    return written

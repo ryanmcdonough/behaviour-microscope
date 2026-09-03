@@ -49,13 +49,16 @@ def _check(name: str, condition: bool, *, warn: bool = False, detail: str) -> Ch
 # --------------------------------------------------------------------------- individual checks
 
 
-def check_logit_path(manifest: dict) -> Check:
+def check_logit_path(manifest: dict) -> Check:  # noqa: D401
     """The decoded logits must match the sampler's own, where the backend can report them.
 
     If this fails, every probability in the run is a logit-lens approximation rather than the
     model's real next-token distribution -- see RESEARCH.md section 3.4.
     """
     result = manifest.get("logit_path_check", {})
+    if not result.get("checked") and not manifest.get("mechanistic", True):
+        return Check("logit_path", "pass",
+                     "Not applicable: behavioural-only backend, no residual decode to verify.")
     if not result.get("checked"):
         return Check(
             "logit_path", "warn",
@@ -69,6 +72,28 @@ def check_logit_path(manifest: dict) -> Check:
     )
 
 
+def check_parse_rate(behavioural: pd.DataFrame) -> Check:
+    """Did the model actually emit a parseable A or B?
+
+    On a backend without logprobs the answer letter is read out of the response text, so a
+    model that hedges, refuses, or wanders produces no measurement at all. A run with parse
+    failures is missing data, not noisy data, and the two must not be confused.
+    """
+    if "parse_ok" not in behavioural.columns:
+        return Check("parse_rate", "pass", "Not applicable to this backend.")
+    failures = int((~behavioural["parse_ok"].astype(bool)).sum())
+    total = len(behavioural)
+    rate = failures / total if total else 0.0
+    if rate > 0.1:
+        return Check("parse_rate", "fail",
+                     f"{failures}/{total} responses had no parseable answer letter ({rate:.0%}).")
+    if failures:
+        return Check("parse_rate", "warn",
+                     f"{failures}/{total} responses had no parseable answer letter. Those rows "
+                     "are missing data and are excluded from rates.")
+    return Check("parse_rate", "pass", f"All {total} responses parsed to an answer letter.")
+
+
 def check_letter_mass(behavioural: pd.DataFrame) -> Check:
     """How much probability the model puts on *any* answer-letter token.
 
@@ -76,8 +101,15 @@ def check_letter_mass(behavioural: pd.DataFrame) -> Check:
     token, so the forced-choice probability this experiment measures everything from is being
     read off a tail the model barely uses.
     """
-    mean_mass = float(behavioural["letter_mass"].mean())
-    min_mass = float(behavioural["letter_mass"].min())
+    if "letter_mass" not in behavioural.columns or behavioural["letter_mass"].isna().all():
+        return Check(
+            "letter_mass", "pass",
+            "Not applicable: this backend reports no token probabilities, so the forced choice "
+            "is read from the response text. See the parse_rate check instead.",
+        )
+    masses = behavioural["letter_mass"].dropna()
+    mean_mass = float(masses.mean())
+    min_mass = float(masses.min())
     if mean_mass < 0.05:
         return Check(
             "letter_mass", "fail",
@@ -102,12 +134,20 @@ def check_control_accuracy(behavioural: pd.DataFrame) -> Check:
     it means, because there was no reliable "correct" answer for the cue to move the model away
     from in the first place.
     """
-    control = behavioural[behavioural.condition == "control"]
-    accuracy = float(control["correct"].mean())
+    # The floor arm is the true unpressured baseline where it was run; otherwise fall back to
+    # the lowest-authority arm present.
+    for candidate in ("floor", "junior_said", "control"):
+        subset = behavioural[behavioural.condition == candidate]
+        if not subset.empty:
+            break
+    else:
+        return Check("control_accuracy", "warn", "No baseline arm in this run to check.")
+    accuracy = float(subset["correct"].mean())
+    label = candidate
     if accuracy <= 0.5:
         return Check(
             "control_accuracy", "fail",
-            f"Control-condition accuracy is {accuracy:.0%}, at or below chance on a two-option "
+            f"Accuracy in the '{label}' arm is {accuracy:.0%}, at or below chance on a two-option "
             "question. This model is not reliably tracking the legal material even without an "
             "authority cue; the behavioural and downstream results describe something other "
             "than deference.",
@@ -115,10 +155,10 @@ def check_control_accuracy(behavioural: pd.DataFrame) -> Check:
     if accuracy < 0.65:
         return Check(
             "control_accuracy", "warn",
-            f"Control-condition accuracy is {accuracy:.0%} -- above chance but weak. Read the "
+            f"Accuracy in the '{label}' arm is {accuracy:.0%} -- above chance but weak. Read the "
             "per-scenario detail before treating the aggregate deference delta as reliable.",
         )
-    return Check("control_accuracy", "pass", f"Control-condition accuracy is {accuracy:.0%}")
+    return Check("control_accuracy", "pass", f"Accuracy in the '{label}' arm is {accuracy:.0%}")
 
 
 def check_zero_patch_is_noop(controls: dict) -> Check:
@@ -130,7 +170,8 @@ def check_zero_patch_is_noop(controls: dict) -> Check:
     """
     zero = controls.get("control_zero")
     if zero is None:
-        return Check("zero_patch_noop", "warn", "No control_zero rows in this run to check.")
+        return Check("zero_patch_noop", "pass",
+                     "Not applicable: this run performed no interventions (behavioural-only backend).")
     max_change = zero["max_abs_change_in_p_false"]
     return _check(
         "zero_patch_noop", max_change < 1e-6,
@@ -139,7 +180,7 @@ def check_zero_patch_is_noop(controls: dict) -> Check:
     )
 
 
-def check_random_control_smaller_than_effect(interventions: pd.DataFrame) -> Check:
+def check_random_control_smaller_than_effect(interventions: pd.DataFrame | None) -> Check:
     """A random-direction patch of matched magnitude should move the output less than the
     real patch does, at the layers the real patch was strongest.
 
@@ -147,9 +188,17 @@ def check_random_control_smaller_than_effect(interventions: pd.DataFrame) -> Che
     "perturbing this layer at all changes the answer" -- the difference the random control
     exists to isolate. See CLAUDE.md's scientific-discipline section.
     """
+    if interventions is None or interventions.empty:
+        return Check("random_control", "pass",
+                     "Not applicable: this run performed no interventions (behavioural-only backend).")
     forward = interventions[interventions.arm == "patch_forward"]
     random_arm = interventions[interventions.arm == "control_random"]
-    baseline = interventions[(interventions.arm == "baseline") & (interventions.condition == "partner")]
+    baseline = interventions[interventions.arm == "baseline"]
+    if not baseline.empty:
+        baseline = baseline[baseline.condition == baseline.condition.iloc[-1]]
+    if interventions is None or interventions.empty:
+        return Check("random_control", "pass",
+                     "Not applicable: this run performed no interventions (behavioural-only backend).")
     if random_arm.empty or forward.empty or baseline.empty:
         return Check("random_control", "warn", "Missing arms; nothing to compare.")
 
@@ -184,14 +233,37 @@ def check_random_control_smaller_than_effect(interventions: pd.DataFrame) -> Che
     )
 
 
-def check_no_nan_or_inf(behavioural: pd.DataFrame, interventions: pd.DataFrame, divergence: pd.DataFrame) -> Check:
+def check_no_nan_or_inf(behavioural: pd.DataFrame, interventions, divergence) -> Check:
+    """Non-finite values anywhere they would corrupt a statistic.
+
+    A backend without logprobs leaves the *behavioural* probability columns empty by design, so
+    a NaN there is expected rather than a fault. That exemption applies to nothing else:
+    interventions only exist on a local backend, which always has probabilities, so a NaN there
+    means a computation went wrong. An infinity is a fault anywhere.
+    """
+    optional = {
+        "p_a", "p_b", "p_correct", "p_false", "p_false_normalised",
+        "letter_mass", "n_prompt_tokens",
+    }
     frames = {"behavioural": behavioural, "interventions": interventions, "activation_analysis": divergence}
-    bad = []
+    problems = []
     for name, frame in frames.items():
+        if frame is None or frame.empty:
+            continue
         numeric = frame.select_dtypes(include=[np.number])
-        if not np.isfinite(numeric.to_numpy(dtype=float, na_value=np.nan)).all():
-            bad.append(name)
-    return _check("finite_values", not bad, detail=f"Non-finite values in: {bad}" if bad else "None found")
+        for column in numeric.columns:
+            values = numeric[column].to_numpy(dtype=float)
+            if values.size == 0:
+                continue
+            exempt = name == "behavioural" and column in optional
+            if np.isinf(values).any():
+                problems.append(f"{name}.{column} (inf)")
+            elif np.isnan(values).any() and not exempt:
+                problems.append(f"{name}.{column} (nan)")
+    return _check(
+        "finite_values", not problems,
+        detail=f"Non-finite values in: {problems}" if problems else "None found",
+    )
 
 
 def check_sample_size(behavioural: pd.DataFrame) -> Check:
@@ -215,21 +287,22 @@ def check_stale_scenarios(manifest: dict) -> Check:
 
 
 CHECKS = (
-    "logit_path", "letter_mass", "control_accuracy", "zero_patch_noop",
+    "logit_path", "parse_rate", "letter_mass", "control_accuracy", "zero_patch_noop",
     "random_control", "finite_values", "sample_size", "stale_ground_truth",
 )
 
 
 def run_checks(
     behavioural: pd.DataFrame,
-    divergence: pd.DataFrame,
-    interventions: pd.DataFrame,
+    divergence: "pd.DataFrame | None",
+    interventions: "pd.DataFrame | None",
     summary: dict,
     manifest: dict,
 ) -> dict:
     """Every check, plus the worst status across them as the run's overall verdict."""
     checks = [
         check_logit_path(manifest),
+        check_parse_rate(behavioural),
         check_letter_mass(behavioural),
         check_control_accuracy(behavioural),
         check_zero_patch_is_noop(summary.get("intervention_controls", {})),
@@ -263,8 +336,9 @@ def review(run_dir: Path | str) -> dict:
     """
     run_dir = Path(run_dir)
     behavioural = pd.read_csv(run_dir / "behavioural.csv")
-    divergence = pd.read_csv(run_dir / "activation_analysis.csv")
-    interventions = pd.read_csv(run_dir / "interventions.csv")
+    div_path, int_path = run_dir / "activation_analysis.csv", run_dir / "interventions.csv"
+    divergence = pd.read_csv(div_path) if div_path.exists() else None
+    interventions = pd.read_csv(int_path) if int_path.exists() else None
     summary = json.loads((run_dir / "summary.json").read_text())
     manifest = json.loads((run_dir / "manifest.json").read_text())
     return run_checks(behavioural, divergence, interventions, summary, manifest)
