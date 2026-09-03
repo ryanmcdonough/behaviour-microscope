@@ -339,7 +339,7 @@ def analyse(
 
 
 def run_all(cfg: RunConfig | None = None, *, verbose: bool = True) -> Path:
-    from . import plots
+    from . import plots, quality
 
     cfg = cfg or RunConfig()
     scenarios = load_scenarios(cfg.data_file)
@@ -434,6 +434,19 @@ def run_all(cfg: RunConfig | None = None, *, verbose: bool = True) -> Path:
         (run_dir / "manifest.json").write_text(json.dumps(manifest, indent=2))
 
         plots.write_all(behavioural, divergence, interventions, run_dir / "plots")
+
+        report = quality.run_checks(behavioural, divergence, interventions, summary, manifest)
+        (run_dir / "quality_report.json").write_text(json.dumps(report, indent=2))
+        log("")
+        log(quality.format_report(report))
+        log("")
+        if report["overall"] == "fail":
+            log(
+                "quality gate: FAIL -- at least one check failed outright. Read the report "
+                "above before drawing any conclusion from behavioural.csv, the plots, or "
+                "summary.json; the run completed, but its numbers are flagged as untrustworthy."
+            )
+
         log(f"Done. Results in {run_dir}")
         return run_dir
     finally:

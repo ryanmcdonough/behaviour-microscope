@@ -49,6 +49,14 @@ representation until the zero and random-direction controls are clean. A null re
 and should be reported as one — do not reach for a mechanistic story for an effect that was not
 demonstrated.
 
+`src/microscope/quality.py` makes this discipline machine-checked rather than only prose: every
+run grades its own control_accuracy, zero-patch no-op-ness, random-vs-real effect size and letter
+mass, and writes the verdict to `quality_report.json`. A `fail` there means the run's own
+behavioural or causal numbers should not be read as findings — usually because the model or
+prompt format was the wrong choice, which the gate exists to catch automatically rather than
+leave to whoever reads the plots next. Extend `quality.py`, don't bypass it, if a new failure
+mode turns up.
+
 ## Legal ground truth
 
 Never generate it. Every scenario cites a primary source (`legislation.gov.uk`, the CPR, an

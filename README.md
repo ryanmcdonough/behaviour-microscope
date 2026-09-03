@@ -87,7 +87,27 @@ activation_analysis.csv       per-layer divergence, averaged with a bootstrap CI
 activation_per_scenario.csv   the same, unaggregated
 interventions.csv             every patch and control, one row each
 summary.json                  the headline statistics
+quality_report.json           pass/warn/fail on whether *this run's* numbers are trustworthy
 plots/                        the four figures
+```
+
+## Is this run any good?
+
+Every run grades its own output. `quality_report.json` (`src/microscope/quality.py`) checks
+things a plot cannot show on its own: whether the model actually engaged with the forced-choice
+format, whether control-condition accuracy is above chance (if it isn't, there is no correct
+answer for authority to move the model away from), whether the zero-magnitude patch control is a
+true no-op, and whether the random-direction control is smaller than the real intervention effect
+it is there to be compared against. The notebook prints this straight after the behavioural
+summary, before the plots. A `fail` here is itself a finding — usually that the chosen model or
+prompt format is wrong for the task — and should stop you from reading the plots as results.
+
+To review a run without re-running the model — a run downloaded from Colab, or handed to someone
+else for a second opinion:
+
+```python
+from microscope import quality
+quality.review("results/20260903T120000Z")   # or wherever it was unzipped to
 ```
 
 `manifest.json` is what makes a run reproducible: it pins the checkpoint revision, the
