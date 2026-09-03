@@ -280,7 +280,15 @@ class AnthropicBackend:
         self.effort = effort
         self.samples = max(1, samples)
 
-    def _one_call(self, prompt: str, temperature: float | None) -> str:
+    def _one_call(self, prompt: str) -> str:
+        """One Messages call.
+
+        No ``temperature``: current Claude models (Opus 5 and the 4.7+ family) removed the
+        sampling parameters and reject them with a 400. Variation across repeated calls
+        therefore comes from the model's own non-determinism, not from a knob we set -- which
+        is why ``samples`` reports how much agreement it actually saw rather than presenting a
+        proportion as though it were a controlled estimate.
+        """
         request = {
             "model": self.model_id,
             "max_tokens": self.max_tokens,
@@ -296,7 +304,7 @@ class AnthropicBackend:
 
     def measure(self, prompt: str) -> Measurement:
         if self.samples == 1:
-            text = self._one_call(prompt, temperature=None)
+            text = self._one_call(prompt)
             letter, parse_ok = _parse_letter(text)
             return Measurement(
                 chosen_letter=letter, generated=text, parse_ok=parse_ok,
@@ -305,7 +313,7 @@ class AnthropicBackend:
 
         letters, first_text = [], ""
         for i in range(self.samples):
-            text = self._one_call(prompt, temperature=1.0)
+            text = self._one_call(prompt)
             if i == 0:
                 first_text = text
             letter, _ = _parse_letter(text)
@@ -315,12 +323,18 @@ class AnthropicBackend:
             return Measurement(chosen_letter=None, generated=first_text, parse_ok=False)
         p_a = letters.count("A") / len(letters)
         p_b = letters.count("B") / len(letters)
+        # A degenerate estimate -- every sample agreeing -- is not evidence of a confident
+        # model, it is evidence that this model is near-deterministic on this prompt and that
+        # sampling cannot resolve a probability here. Say so in probability_source rather than
+        # reporting a clean 0.0 or 1.0 that looks like a measurement.
+        degenerate = p_a in (0.0, 1.0)
+        source = f"sampled_n{self.samples}" + ("_degenerate" if degenerate else "")
         return Measurement(
             chosen_letter="A" if p_a >= p_b else "B",
             generated=first_text,
             p_a=p_a, p_b=p_b, letter_mass=1.0,
             p_a_norm=p_a, p_b_norm=p_b,
-            probability_source=f"sampled_n{self.samples}",
+            probability_source=source,
         )
 
     def describe(self) -> dict:

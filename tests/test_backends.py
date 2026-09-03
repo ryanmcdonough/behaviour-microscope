@@ -228,3 +228,27 @@ def test_backend_spec_refuses_an_unknown_kind():
 def test_measurement_defaults_to_no_probabilities():
     m = Measurement(chosen_letter="A", generated="A")
     assert m.p_a is None and m.letter_mass is None and m.parse_ok is True
+
+
+def test_anthropic_never_sends_sampling_parameters(monkeypatch):
+    """Current Claude models reject temperature/top_p with a 400."""
+    client = _install_fake_anthropic(monkeypatch, [_anthropic_response("A")])
+    AnthropicBackend("claude-opus-5").measure("prompt")
+    sent = client.messages.create.call_args.kwargs
+    for banned in ("temperature", "top_p", "top_k"):
+        assert banned not in sent
+
+
+def test_anthropic_flags_a_degenerate_sampling_estimate(monkeypatch):
+    """Every sample agreeing means sampling could not resolve a probability, not p=1.0."""
+    _install_fake_anthropic(monkeypatch, [_anthropic_response("A") for _ in range(4)])
+    m = AnthropicBackend("claude-opus-5", samples=4).measure("prompt")
+    assert m.p_a == 1.0
+    assert m.probability_source == "sampled_n4_degenerate"
+
+
+def test_anthropic_sampling_is_not_flagged_when_it_actually_varies(monkeypatch):
+    _install_fake_anthropic(monkeypatch, [_anthropic_response(t) for t in ["A", "A", "B", "A"]])
+    m = AnthropicBackend("claude-opus-5", samples=4).measure("prompt")
+    assert m.p_a == 0.75
+    assert m.probability_source == "sampled_n4"
