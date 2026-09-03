@@ -67,6 +67,53 @@ class RunConfig:
     # The pair the mechanistic experiments patch between. Source varies, verb held constant, so
     # the mechanism answers the source question rather than the epistemic-verb question.
     contrast: tuple[str, str] = DEFAULT_CONTRAST
+    # How often a long phase reports progress. Lower it to watch a run more closely.
+    progress_every_seconds: float = 15.0
+
+
+class Progress:
+    """Periodic progress with an ETA, for phases that run for minutes.
+
+    Reports on a timer rather than every item: a 2,880-patch sweep would otherwise bury the
+    interesting output. The first item always reports, so a long phase says something within
+    seconds of starting and a stalled run is distinguishable from a slow one.
+    """
+
+    def __init__(self, total: int, log, *, every_seconds: float = 15.0):
+        self.total = total
+        self.log = log
+        self.every = every_seconds
+        self.done = 0
+        self.start = time.monotonic()
+        self._last_report = 0.0
+
+    @staticmethod
+    def _clock(seconds: float) -> str:
+        seconds = int(seconds)
+        if seconds < 60:
+            return f"{seconds}s"
+        if seconds < 3600:
+            return f"{seconds // 60}m{seconds % 60:02d}s"
+        return f"{seconds // 3600}h{(seconds % 3600) // 60:02d}m"
+
+    def tick(self, detail: str = "") -> None:
+        self.done += 1
+        now = time.monotonic()
+        first = self.done == 1
+        last = self.done == self.total
+        if not (first or last or now - self._last_report >= self.every):
+            return
+        self._last_report = now
+        elapsed = now - self.start
+        rate = self.done / elapsed if elapsed > 0 else 0.0
+        remaining = (self.total - self.done) / rate if rate > 0 else 0.0
+        pct = 100.0 * self.done / self.total if self.total else 100.0
+        suffix = f"  {detail}" if detail else ""
+        self.log(
+            f"    [{self.done:>5}/{self.total}] {pct:3.0f}%  "
+            f"elapsed {self._clock(elapsed)}  eta {self._clock(remaining)}"
+            f"  {rate:.2f}/s{suffix}"
+        )
 
 
 # --------------------------------------------------------------------------- manifest
@@ -174,13 +221,17 @@ def _measurement_row(scenario: Scenario, condition: str, prompt: str, m: Measure
     }
 
 
-def run_behavioural(backend: Backend, scenarios: list[Scenario], cfg: RunConfig) -> pd.DataFrame:
+def run_behavioural(
+    backend: Backend, scenarios: list[Scenario], cfg: RunConfig, progress: Progress | None = None
+) -> pd.DataFrame:
     """Experiment 1, on any backend. The only experiment a closed-weights model can run."""
     rows = []
     for scenario in scenarios:
         for condition in cfg.arms:
             prompt = scenario.prompt(condition)
             rows.append(_measurement_row(scenario, condition, prompt, backend.measure(prompt)))
+            if progress:
+                progress.tick(f"{scenario.id} / {condition}")
     return pd.DataFrame(rows)
 
 
@@ -188,7 +239,10 @@ def run_behavioural(backend: Backend, scenarios: list[Scenario], cfg: RunConfig)
 
 
 def run_activations(
-    handle: interp.ModelHandle, scenarios: list[Scenario], contrast: tuple[str, str]
+    handle: interp.ModelHandle,
+    scenarios: list[Scenario],
+    contrast: tuple[str, str],
+    progress: Progress | None = None,
 ) -> tuple[pd.DataFrame, dict[str, dict[str, dict[int, torch.Tensor]]]]:
     """Capture every layer's residual at the final prompt position, for the contrast pair."""
     low, high = contrast
@@ -199,6 +253,8 @@ def run_activations(
         for condition in contrast:
             token_ids = interp.tokenize_prompt(handle, scenario.prompt(condition))
             per_condition[condition] = interp.capture_residuals(handle, token_ids)
+            if progress:
+                progress.tick(f"{scenario.id} / {condition}")
         captured[scenario.id] = per_condition
         frame = metrics.activation_divergence(
             {layer: act.numpy() for layer, act in per_condition[low].items()},
@@ -234,6 +290,7 @@ def run_interventions(
     captured: dict,
     candidates: list[int],
     cfg: RunConfig,
+    progress: Progress | None = None,
 ) -> pd.DataFrame:
     """Bidirectional patching over every layer, plus the zero and random controls.
 
@@ -271,6 +328,8 @@ def run_interventions(
                     _record(scenario, handle, baselines[low], arm="patch_reverse",
                             condition=low, layer=layer, patch_norm=0.0)
                 )
+                if progress:
+                    progress.tick(f"{scenario.id} / L{layer} (identical, skipped)")
                 continue
 
             rows.append(
@@ -287,6 +346,8 @@ def run_interventions(
                     arm="patch_reverse", condition=low, layer=layer, patch_norm=norm,
                 )
             )
+            if progress:
+                progress.tick(f"{scenario.id} / L{layer}")
 
             if layer in candidates:
                 rows.append(
@@ -497,26 +558,42 @@ def run_all(cfg: RunConfig | None = None, *, verbose: bool = True) -> Path:
             logit_check = interp.verify_logit_path(backend.handle, probe)
             log(f"Logit path check: {logit_check}")
 
-        log(f"Experiment 1: behaviour over {len(scenarios)} scenarios x {len(cfg.arms)} arms ...")
+        n_measurements = len(scenarios) * len(cfg.arms)
+        log(f"Experiment 1: behaviour over {len(scenarios)} scenarios x {len(cfg.arms)} arms "
+            f"= {n_measurements} measurements ...")
         with phase("behavioural"):
-            behavioural = run_behavioural(backend, scenarios, cfg)
+            behavioural = run_behavioural(
+                backend, scenarios, cfg, Progress(n_measurements, log, every_seconds=cfg.progress_every_seconds) if verbose else None
+            )
         behavioural.to_csv(run_dir / "behavioural.csv", index=False)
 
         if mechanistic:
             low, high = cfg.contrast
             log(f"Experiment 2: capturing resid_post across {backend.handle.n_layers} layers "
                 f"for {low} vs {high} ...")
+            n_captures = len(scenarios) * len(cfg.contrast)
             with phase("activations"):
-                per_scenario, captured = run_activations(backend.handle, scenarios, cfg.contrast)
+                per_scenario, captured = run_activations(
+                    backend.handle, scenarios, cfg.contrast,
+                    Progress(n_captures, log, every_seconds=cfg.progress_every_seconds) if verbose else None,
+                )
             divergence = metrics.summarise_divergence(per_scenario)
             divergence.to_csv(run_dir / "activation_analysis.csv", index=False)
             per_scenario.to_csv(run_dir / "activation_per_scenario.csv", index=False)
             candidates = metrics.candidate_layers(divergence, k=cfg.n_candidate_layers)
             log(f"Candidate layers (largest divergence, not yet a mechanism): {candidates}")
 
-            log("Experiments 3 and 4: bidirectional patching across every layer, plus controls ...")
+            # Two patches per layer per scenario, plus two controls at each candidate layer.
+            n_patches = len(scenarios) * backend.handle.n_layers
+            n_controls = len(scenarios) * len(candidates)
+            log(f"Experiments 3 and 4: bidirectional patching across {backend.handle.n_layers} "
+                f"layers, plus controls -- {n_patches} layer-steps "
+                f"({2 * n_patches + 2 * n_controls} forwards) ...")
             with phase("interventions"):
-                interventions = run_interventions(backend.handle, scenarios, captured, candidates, cfg)
+                interventions = run_interventions(
+                    backend.handle, scenarios, captured, candidates, cfg,
+                    Progress(n_patches, log, every_seconds=cfg.progress_every_seconds) if verbose else None,
+                )
             interventions.to_csv(run_dir / "interventions.csv", index=False)
 
             if cfg.save_activations:
