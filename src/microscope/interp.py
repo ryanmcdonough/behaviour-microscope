@@ -75,9 +75,19 @@ def open_model(model_id: str, *, backend: str = "eager", dtype: str | None = Non
     which removes most of its speed advantage at this model size, and the eager backend is the
     one that serves every point and fills in ``GenStep.logits`` for the cross-check in
     ``verify_logit_path``.
+
+    That choice has a sharp edge: ``load_model``'s own CUDA auto-detection only runs for
+    ``backend="auto"``. Forcing ``"eager"`` here bypasses that ladder entirely, and
+    ``EagerModel`` with no ``device``/``device_map`` falls through to whatever
+    ``transformers.AutoModelForCausalLM.from_pretrained`` does with neither -- CPU, silently,
+    even with a GPU sitting idle. So this fills the same default back in, unless the caller
+    named a device explicitly (a caller that passed ``device="cpu"`` for a small local test,
+    say, must not be overridden).
     """
     if dtype is not None:
         kwargs["dtype"] = dtype
+    if backend == "eager" and "device" not in kwargs and "device_map" not in kwargs:
+        kwargs["device"] = "cuda" if torch.cuda.is_available() else "cpu"
     model = load_model(model_id, backend=backend, **kwargs)
     sync = sync_model(model)
     sync.warmup()

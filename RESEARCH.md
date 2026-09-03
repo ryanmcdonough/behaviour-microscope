@@ -154,6 +154,7 @@ every depth.
 | Intervene at candidate layers | sweep all layers, controls at candidates | Subsumes the unrelated-layer control. §3.5 |
 | Gemma "a likely candidate" | `google/gemma-2-2b-it` default, configurable | Confirmed in the engine's own benchmark set and gpu-sizer. It is a **gated** checkpoint, so the notebook needs an HF token; `Qwen/Qwen3-4B` is the ungated alternative and is also in the engine's tested set. |
 | — | `accelerate` added as a dependency | `transformers` requires it to place a model on a device; `interp-engine` does not pull it in. Found by running the code, not by reading. |
+| — | `interp.open_model` fills in `device="cuda"` itself when available | `load_model`'s own CUDA auto-detection ladder (`select_backend`) only runs for `backend="auto"`. Forcing `backend="eager"` (§3.1) bypasses it entirely, and `EagerModel` with neither `device` nor `device_map` falls through to whatever `transformers.from_pretrained` does with neither — CPU, silently, with the GPU idle. Found on a real Colab A100 run: gemma-3-12b-it loaded and ran a full behavioural experiment on CPU with the card showing 0.0/40.0 GB used throughout, which is what a flat GPU-memory sparkline through an entire run means. Every local test in this repo had explicitly passed `device="cpu"`, which is exactly why this was not caught before a real GPU run. |
 
 ## 5. Threats to validity, recorded up front
 
