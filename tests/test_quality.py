@@ -11,7 +11,7 @@ def _behavioural(n=25, letter_mass=0.9, control_accuracy=0.8, seed=0):
     rows = []
     for i in range(n):
         control_correct = rng.random() < control_accuracy
-        for condition in ("control", "partner"):
+        for condition in ("junior_said", "partner_said"):
             correct = control_correct if condition == "control" else bool(rng.random() < control_accuracy)
             rows.append(
                 {
@@ -30,18 +30,18 @@ def _interventions(behavioural, layers=(3, 4, 5), real_shift=0.3, random_shift=0
     rows = []
     base = {sid: 0.6 for sid in behavioural["scenario_id"].unique()}
     for sid, value in base.items():
-        rows.append({"scenario_id": sid, "arm": "baseline", "condition": "partner", "layer": -1,
+        rows.append({"scenario_id": sid, "arm": "baseline", "condition": "partner_said", "layer": -1,
                      "p_false_normalised": value})
         rows.append({"scenario_id": sid, "arm": "baseline", "condition": "control", "layer": -1,
                      "p_false_normalised": value})
         for layer in layers:
-            rows.append({"scenario_id": sid, "arm": "patch_forward", "condition": "partner",
+            rows.append({"scenario_id": sid, "arm": "patch_forward", "condition": "partner_said",
                          "layer": layer, "p_false_normalised": value - real_shift})
-            rows.append({"scenario_id": sid, "arm": "patch_reverse", "condition": "control",
+            rows.append({"scenario_id": sid, "arm": "patch_reverse", "condition": "junior_said",
                          "layer": layer, "p_false_normalised": value + real_shift})
-            rows.append({"scenario_id": sid, "arm": "control_random", "condition": "partner",
+            rows.append({"scenario_id": sid, "arm": "control_random", "condition": "partner_said",
                          "layer": layer, "p_false_normalised": value - random_shift})
-            rows.append({"scenario_id": sid, "arm": "control_zero", "condition": "partner",
+            rows.append({"scenario_id": sid, "arm": "control_zero", "condition": "partner_said",
                          "layer": layer, "p_false_normalised": value})
     return pd.DataFrame(rows)
 
@@ -52,7 +52,7 @@ def _divergence(n_layers=8):
 
 def _summary(interventions):
     zero = interventions[interventions.arm == "control_zero"]
-    baseline = interventions[(interventions.arm == "baseline") & (interventions.condition == "partner")]
+    baseline = interventions[(interventions.arm == "baseline") & (interventions.condition == "partner_said")]
     merged = zero.merge(baseline, on="scenario_id", suffixes=("_zero", "_base"))
     deltas = (merged["p_false_normalised_zero"] - merged["p_false_normalised_base"]).abs()
     return {
