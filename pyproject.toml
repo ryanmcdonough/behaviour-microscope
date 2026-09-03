@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "behaviour-microscope"
+version = "0.1.0"
+description = "Does an authority cue change how a language model handles conflicting UK legal information?"
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+license = { text = "MIT" }
+
+dependencies = [
+    # The interpretability runtime. Pinned at the minor level on the maintainers' own advice:
+    # the API is settled but not frozen while the engine is on 1.x, and 1.1 and 1.3 both changed
+    # signatures. See RESEARCH.md.
+    "interp-engine~=1.3",
+    # transformers is part of the numerical result, not just a dependency: interp-engine has no
+    # forward pass of its own and hooks transformers modules. Floor matches the engine's.
+    "transformers>=4.57.1",
+    # Required by transformers to place a model on a device; not pulled in by interp-engine.
+    "accelerate>=1.0",
+    "torch>=2.0",
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "scipy>=1.11",
+    "matplotlib>=3.7",
+    "huggingface-hub>=0.25",
+]
+
+[project.optional-dependencies]
+# The vLLM backend. Linux + CUDA only; the experiment defaults to eager. See RESEARCH.md.
+vllm = ["interp-engine[vllm]~=1.3"]
+dev = ["pytest>=8.0"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"

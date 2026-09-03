@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# Runs are outputs, not source. manifest.json is what makes one reproducible.
+results/*
+!results/.gitkeep
