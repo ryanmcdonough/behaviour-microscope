@@ -13,6 +13,7 @@ diverged looks different from one that matters everywhere.
 from __future__ import annotations
 
 import json
+import gc
 import platform
 import subprocess
 import sys
@@ -69,6 +70,10 @@ class RunConfig:
     contrast: tuple[str, str] = DEFAULT_CONTRAST
     # How often a long phase reports progress. Lower it to watch a run more closely.
     progress_every_seconds: float = 15.0
+    # Turn a hybrid-reasoning model's reasoning on. Ignored by a model with no reasoning mode.
+    # A reasoning run is behavioural-only: the answer no longer sits at the final prompt
+    # position, so the patching experiments would be intervening on the wrong thing.
+    enable_thinking: bool = False
 
 
 class Progress:
@@ -533,6 +538,7 @@ def run_all(cfg: RunConfig | None = None, *, verbose: bool = True) -> Path:
     if cfg.provider == "local":
         options.update(cfg.extra_load_kwargs)
         options.setdefault("backend", cfg.backend)
+        options.setdefault("enable_thinking", cfg.enable_thinking)
         if cfg.dtype is not None:
             options.setdefault("dtype", cfg.dtype)
     log(f"Opening {cfg.provider} backend for {cfg.model_id} ...")
@@ -546,8 +552,16 @@ def run_all(cfg: RunConfig | None = None, *, verbose: bool = True) -> Path:
     logit_check: dict = {"checked": False, "reason": f"{cfg.provider} backend"}
 
     try:
-        mechanistic = isinstance(backend, LocalBackend)
-        if not mechanistic:
+        mechanistic = isinstance(backend, LocalBackend) and backend.supports_mechanistic_now
+        if isinstance(backend, LocalBackend):
+            if backend.handle.enable_thinking and not backend.handle.has_reasoning_mode:
+                log("NOTE: enable_thinking was requested but this model has no reasoning mode; "
+                    "it reads no such template control, so the run is unchanged.")
+            elif backend.response_mode == "generate":
+                log("NOTE: reasoning is ON, so the answer is parsed from the completion rather "
+                    "than read from the first token, and experiments 2-4 are skipped -- the "
+                    "answer no longer sits at the final prompt position for patching to reach.")
+        else:
             log(
                 f"NOTE: the {cfg.provider} backend is behavioural-only. Closed weights cannot be "
                 "captured or patched, so experiments 2-4 are skipped for this run."
@@ -618,6 +632,7 @@ def run_all(cfg: RunConfig | None = None, *, verbose: bool = True) -> Path:
                 "arms": list(cfg.arms),
                 "contrast": list(cfg.contrast),
                 "mechanistic": mechanistic,
+                "enable_thinking": cfg.enable_thinking,
                 "candidate_layers": candidates,
                 "logit_path_check": logit_check,
                 "timings_seconds": timings,
@@ -645,3 +660,78 @@ def run_all(cfg: RunConfig | None = None, *, verbose: bool = True) -> Path:
         return run_dir
     finally:
         backend.shutdown()
+
+
+# --------------------------------------------------------------------------- sweep
+
+
+def free_device_memory() -> None:
+    """Release whatever the last model left on the card.
+
+    ``shutdown()`` tells the engine to let go, but Python still holds the model until the last
+    reference dies, and the allocator still holds the freed blocks until told to release them.
+    Loading a 12B and then a 14B on one card fails on either omission -- and it fails as an OOM
+    during the *second* load, which reads like the second model being too big rather than the
+    first still being resident.
+    """
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+
+
+def sweep_label(cfg: RunConfig) -> str:
+    """A name that distinguishes runs of one checkpoint that differ only in configuration.
+
+    A reasoning-on and a reasoning-off run of the same model are two different measurements and
+    must not collide in a results mapping.
+    """
+    if cfg.provider != "local":
+        return cfg.model_id
+    return f"{cfg.model_id} ({'thinking' if cfg.enable_thinking else 'no thinking'})"
+
+
+def run_sweep(configs: "list[RunConfig]", *, verbose: bool = True) -> dict[str, Path]:
+    """Run several configurations in one session, one model resident at a time.
+
+    A failure is reported and the sweep continues: one model being unavailable should not cost
+    the results of the others, and a partial sweep is still a comparison. Order the list so the
+    run most likely to fail comes first -- a new code path is worth discovering in the first two
+    minutes rather than after an hour of GPU time.
+    """
+    results: dict[str, Path] = {}
+    for i, cfg in enumerate(configs, start=1):
+        label = sweep_label(cfg)
+        if verbose:
+            print(f"\n{'=' * 74}\n[{i}/{len(configs)}] {label}\n{'=' * 74}", flush=True)
+        # Never let one completed run overwrite another. Configs in a real sweep differ, so
+        # labels differ -- but a repeated config costs GPU time either way and losing its
+        # result silently is the wrong failure.
+        if label in results:
+            label = f"{label} #{sum(1 for k in results if k.startswith(label)) + 1}"
+        try:
+            results[label] = run_all(cfg, verbose=verbose)
+        except Exception as exc:  # noqa: BLE001 - a sweep must survive one model failing
+            print(f"FAILED {label}: {type(exc).__name__}: {exc}", flush=True)
+        finally:
+            free_device_memory()
+    if verbose:
+        print(f"\nSweep complete: {len(results)}/{len(configs)} succeeded.", flush=True)
+        for label, path in results.items():
+            print(f"  {label:44s} {path.name}", flush=True)
+    return results
+
+
+def compare_runs(run_dirs: dict[str, Path]) -> pd.DataFrame:
+    """FPAR per arm across runs -- the one measure every backend can report.
+
+    Probabilities are not comparable across backends: the Anthropic API exposes none, and a
+    reasoning run is parsed from text rather than read from logits. The binary acceptance rate
+    needs only the answer letter, which is why it is the cross-model measure.
+    """
+    rows = []
+    for label, path in run_dirs.items():
+        summary = json.loads((Path(path) / "summary.json").read_text())
+        rows.append({"model": label, **summary["behavioural"]["fpar_by_arm"]})
+    frame = pd.DataFrame(rows).set_index("model")
+    return frame[[a for a in CONDITIONS if a in frame.columns]]

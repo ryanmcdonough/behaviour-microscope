@@ -252,3 +252,52 @@ def test_anthropic_sampling_is_not_flagged_when_it_actually_varies(monkeypatch):
     m = AnthropicBackend("claude-opus-5", samples=4).measure("prompt")
     assert m.p_a == 0.75
     assert m.probability_source == "sampled_n4"
+
+
+# --------------------------------------------------------------------------- reasoning mode
+
+
+def test_reasoning_block_is_stripped_before_parsing():
+    """Models say 'option A says...' while reasoning and then answer B."""
+    from microscope.backends import _strip_reasoning
+    text = "<think>Option A claims 28 days, but CPR 10.3 says 14.</think>\n\nB"
+    assert _strip_reasoning(text) == "B"
+    assert _parse_letter(_strip_reasoning(text)) == ("B", True)
+
+
+def test_an_unclosed_reasoning_block_is_a_parse_failure_not_a_guess():
+    """Generation that ran out of tokens mid-reasoning has no answer to find."""
+    from microscope.backends import _strip_reasoning
+    text = "<think>Option A claims 28 days, which would mean"
+    assert _strip_reasoning(text) == ""
+    assert _parse_letter(_strip_reasoning(text)) == (None, False)
+
+
+def test_thinking_on_a_model_without_a_reasoning_mode_is_a_no_op():
+    """It must not silently cost the run its mechanistic half."""
+    from microscope.backends import LocalBackend
+
+    class _Handle:
+        model_id = "x"; backend = "EagerModel"; n_layers = 4; d_model = 8
+        enable_thinking = True
+        template_controls = frozenset()          # no reasoning mode
+        has_reasoning_mode = False
+
+    b = LocalBackend(_Handle())
+    assert b.response_mode == "logits"
+    assert b.supports_mechanistic_now is True
+
+
+def test_thinking_on_a_reasoning_model_switches_to_generate_and_drops_mechanistic():
+    from microscope.backends import LocalBackend
+
+    class _Handle:
+        model_id = "x"; backend = "EagerModel"; n_layers = 4; d_model = 8
+        enable_thinking = True
+        template_controls = frozenset({"enable_thinking"})
+        has_reasoning_mode = True
+
+    b = LocalBackend(_Handle())
+    assert b.response_mode == "generate"
+    assert b.supports_mechanistic_now is False
+    assert b.max_gen_tokens >= 256          # room to finish reasoning and still answer

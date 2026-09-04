@@ -34,6 +34,23 @@ _LETTER_RE = re.compile(r"\b([AB])\b")
 # The OpenAI endpoint caps top_logprobs at 5.
 TOP_LOGPROBS = 5
 
+# A reasoning block, which must not be searched for the answer letter -- models routinely
+# write "option A says..." while reasoning and then answer B.
+_REASONING_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+
+
+def _strip_reasoning(text: str) -> str:
+    """Drop a closed reasoning block, keeping what the model said afterwards.
+
+    An unclosed block means generation ran out of tokens mid-reasoning; there is no answer to
+    find, and returning the empty string makes that a parse failure rather than letting a
+    letter mentioned inside the reasoning be scored as the model's answer.
+    """
+    stripped = _REASONING_RE.sub("", text)
+    if "<think>" in stripped.lower():
+        return ""
+    return stripped.strip()
+
 
 @dataclass
 class Measurement:
@@ -86,18 +103,57 @@ def _parse_letter(text: str) -> tuple[str | None, bool]:
 
 
 class LocalBackend:
-    """Open weights through interp-engine. The only backend that can be patched."""
+    """Open weights through interp-engine. The only backend that can be patched.
+
+    Two response modes, and which one is valid depends on the model rather than on preference:
+
+    ``logits``   read P(A) and P(B) off the first generated token. Exact, one forward pass, and
+                 the basis of every mechanistic experiment -- but it assumes the answer *is*
+                 the first token.
+    ``generate`` generate a completion and parse the letter out of the text, exactly as the API
+                 backends do. Required when reasoning is on, because the answer then sits after
+                 a reasoning block and the first token is ``<think>``.
+
+    A reasoning run is behavioural-only. The patching experiments intervene at the final prompt
+    position on the assumption that the next token is the decision; with a reasoning block in
+    between, that assumption does not hold and the intervention would be measuring something
+    else.
+    """
 
     supports_mechanistic = True
 
-    def __init__(self, handle: interp.ModelHandle, max_gen_tokens: int = 24):
+    def __init__(self, handle: interp.ModelHandle, max_gen_tokens: int = 24,
+                 response_mode: str | None = None):
         self.handle = handle
         self.name = "local"
         self.model_id = handle.model_id
+        # Reasoning on means the answer is not the first token, so the logit read is invalid.
+        # But only for a model that *has* a reasoning mode: asking for thinking on a model whose
+        # template does not read it changes nothing about the prompt, so it must not cost the
+        # run its mechanistic half. "Reasoning was off" and "there is no reasoning" differ.
+        reasoning_on = handle.enable_thinking and handle.has_reasoning_mode
+        self.response_mode = response_mode or ("generate" if reasoning_on else "logits")
+        if self.response_mode == "generate" and max_gen_tokens < 256:
+            # Enough room to finish reasoning and still reach the answer.
+            max_gen_tokens = 512
         self.max_gen_tokens = max_gen_tokens
+
+    @property
+    def supports_mechanistic_now(self) -> bool:
+        return self.response_mode == "logits"
 
     def measure(self, prompt: str) -> Measurement:
         token_ids = interp.tokenize_prompt(self.handle, prompt)
+        if self.response_mode == "generate":
+            text = interp.generate_answer(self.handle, token_ids, max_tokens=self.max_gen_tokens)
+            letter, parse_ok = _parse_letter(_strip_reasoning(text))
+            return Measurement(
+                chosen_letter=letter,
+                generated=text.strip(),
+                n_prompt_tokens=len(token_ids),
+                parse_ok=parse_ok,
+                probability_source="text",
+            )
         logits = interp.next_token_logits(self.handle, token_ids)
         probs = interp.letter_probabilities(self.handle, logits)
         generated = interp.generate_answer(self.handle, token_ids, max_tokens=self.max_gen_tokens)
@@ -120,6 +176,10 @@ class LocalBackend:
             "engine_backend": self.handle.backend,
             "n_layers": self.handle.n_layers,
             "d_model": self.handle.d_model,
+            "response_mode": self.response_mode,
+            "enable_thinking": self.handle.enable_thinking,
+            "has_reasoning_mode": self.handle.has_reasoning_mode,
+            "template_controls": sorted(self.handle.template_controls),
         }
 
     def shutdown(self) -> None:

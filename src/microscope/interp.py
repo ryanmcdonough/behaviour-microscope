@@ -54,6 +54,14 @@ class ModelHandle:
     # Only consulted on models whose chat template reads it. False keeps the answer in the
     # first generated token, which is what the forced-choice measurement requires.
     enable_thinking: bool = False
+    # Which optional template controls this model actually reads. Empty for a model with no
+    # reasoning mode at all -- which is itself a fact worth recording, because "reasoning was
+    # off" and "there is no reasoning to turn on" are different claims about a result.
+    template_controls: frozenset[str] = frozenset()
+
+    @property
+    def has_reasoning_mode(self) -> bool:
+        return "enable_thinking" in self.template_controls
 
     @property
     def last_layer(self) -> int:
@@ -110,6 +118,11 @@ def open_model(
         d_model=model.d_model,
         letter_token_ids={},
         enable_thinking=enable_thinking,
+        template_controls=frozenset(
+            model.tok.accepted_template_kwargs(["enable_thinking", "reasoning_effort"])
+            if model.tok.has_chat_template()
+            else []
+        ),
     )
     handle.letter_token_ids = _answer_token_ids(model)
     return handle
@@ -172,7 +185,7 @@ def tokenize_prompt(handle: ModelHandle, prompt: str) -> list[int]:
         # Reasoning-vs-not is a variable worth studying (see RESEARCH.md); this pins it to a
         # known state rather than leaving it to each model's default.
         template_kwargs: dict = {}
-        if "enable_thinking" in model.tok.accepted_template_kwargs(["enable_thinking"]):
+        if handle.has_reasoning_mode:
             template_kwargs["enable_thinking"] = handle.enable_thinking
         return list(
             model.tok.apply_chat_template(

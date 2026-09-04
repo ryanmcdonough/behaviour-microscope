@@ -9,3 +9,6 @@ venv/
 results/*
 !results/.gitkeep
 .DS_Store
+
+# Run archives downloaded from Colab
+*.zip

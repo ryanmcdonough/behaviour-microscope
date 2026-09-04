@@ -65,3 +65,20 @@ def test_candidate_layers_are_ranked_by_mean_divergence():
         {"layer": [0, 1, 2, 3], "mean_relative_l2": [0.1, 0.9, 0.4, 0.8]}
     )
     assert metrics.candidate_layers(frame, k=2) == [1, 3]
+
+
+def test_sweep_labels_distinguish_reasoning_variants():
+    """A reasoning-on and reasoning-off run of one model are two measurements, not one."""
+    from microscope.experiment import RunConfig, sweep_label
+
+    off = sweep_label(RunConfig(model_id="Qwen/Qwen3-14B", enable_thinking=False))
+    on = sweep_label(RunConfig(model_id="Qwen/Qwen3-14B", enable_thinking=True))
+    assert off != on
+    assert "no thinking" in off and "thinking" in on
+
+
+def test_sweep_label_for_an_api_run_is_just_the_model():
+    """Reasoning is a provider option there, not a local template control."""
+    from microscope.experiment import RunConfig, sweep_label
+
+    assert sweep_label(RunConfig(model_id="gpt-5.1", provider="openai")) == "gpt-5.1"
