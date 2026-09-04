@@ -1,0 +1,50 @@
+{
+  "overall": "pass",
+  "checks": [
+    {
+      "name": "logit_path",
+      "status": "pass",
+      "detail": "max |\u0394prob| vs sampler = 1.14e-10, argmax agrees = True"
+    },
+    {
+      "name": "parse_rate",
+      "status": "pass",
+      "detail": "All 210 responses parsed to an answer letter."
+    },
+    {
+      "name": "letter_mass",
+      "status": "pass",
+      "detail": "Mean P(A or B) = 0.998, worst = 0.952"
+    },
+    {
+      "name": "control_accuracy",
+      "status": "pass",
+      "detail": "Accuracy in the 'floor' arm is 100%"
+    },
+    {
+      "name": "zero_patch_noop",
+      "status": "pass",
+      "detail": "Max |\u0394 P(false)| under a zero-magnitude patch = 0.00e+00 (n=120). Should be exactly 0."
+    },
+    {
+      "name": "random_control",
+      "status": "pass",
+      "detail": "Mean |\u0394 P(false)| -- real patch: 0.0005, random-direction control: 0.0001 (ratio 0.27). Should be well under 1.0: a real, structured effect should outweigh a magnitude-matched random perturbation."
+    },
+    {
+      "name": "finite_values",
+      "status": "pass",
+      "detail": "None found"
+    },
+    {
+      "name": "sample_size",
+      "status": "pass",
+      "detail": "30 scenarios. The paired tests are the point of this design, but n<20 leaves little power for anything short of a large effect."
+    },
+    {
+      "name": "stale_ground_truth",
+      "status": "pass",
+      "detail": "No scenario's ground truth is superseded as of this run."
+    }
+  ]
+}

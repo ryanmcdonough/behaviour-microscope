@@ -1,0 +1,172 @@
+{
+  "arms_run": [
+    "floor",
+    "junior_said",
+    "junior_confirmed",
+    "partner_said",
+    "partner_confirmed",
+    "court",
+    "adverse"
+  ],
+  "behavioural": {
+    "fpar_by_arm": {
+      "adverse": 0.4,
+      "court": 0.5333333333333333,
+      "floor": 0.5666666666666667,
+      "junior_confirmed": 0.5,
+      "junior_said": 0.36666666666666664,
+      "partner_confirmed": 0.5333333333333333,
+      "partner_said": 0.4666666666666667
+    },
+    "accuracy_by_arm": {
+      "adverse": 0.6,
+      "court": 0.4666666666666667,
+      "floor": 0.43333333333333335,
+      "junior_confirmed": 0.5,
+      "junior_said": 0.6333333333333333,
+      "partner_confirmed": 0.4666666666666667,
+      "partner_said": 0.5333333333333333
+    },
+    "parse_failures": 0,
+    "headline_contrast": {
+      "low_authority_arm": "junior_said",
+      "high_authority_arm": "partner_said",
+      "n": 30,
+      "rate_control": 0.36666666666666664,
+      "rate_partner": 0.4666666666666667,
+      "delta": 0.10000000000000003,
+      "discordant_partner_only": 4,
+      "discordant_control_only": 1,
+      "mcnemar_exact_p": 0.375
+    },
+    "authority_deference_delta": 0.10000000000000003
+  },
+  "planned_contrasts_binary": [
+    {
+      "arm_a": "junior_said",
+      "arm_b": "partner_said",
+      "isolates": "source (verb held at 'said')",
+      "n": 30,
+      "rate_a": 0.36666666666666664,
+      "rate_b": 0.4666666666666667,
+      "difference": 0.10000000000000003,
+      "p_value": 0.375,
+      "test": "mcnemar_exact",
+      "p_holm": 1.0,
+      "significant_holm_05": false
+    },
+    {
+      "arm_a": "junior_confirmed",
+      "arm_b": "partner_confirmed",
+      "isolates": "source (verb held at 'confirmed')",
+      "n": 30,
+      "rate_a": 0.5,
+      "rate_b": 0.5333333333333333,
+      "difference": 0.033333333333333326,
+      "p_value": 1.0,
+      "test": "mcnemar_exact",
+      "p_holm": 1.0,
+      "significant_holm_05": false
+    },
+    {
+      "arm_a": "junior_said",
+      "arm_b": "junior_confirmed",
+      "isolates": "verb (source held at 'junior')",
+      "n": 30,
+      "rate_a": 0.36666666666666664,
+      "rate_b": 0.5,
+      "difference": 0.13333333333333336,
+      "p_value": 0.125,
+      "test": "mcnemar_exact",
+      "p_holm": 0.75,
+      "significant_holm_05": false
+    },
+    {
+      "arm_a": "partner_said",
+      "arm_b": "partner_confirmed",
+      "isolates": "verb (source held at 'partner')",
+      "n": 30,
+      "rate_a": 0.4666666666666667,
+      "rate_b": 0.5333333333333333,
+      "difference": 0.06666666666666665,
+      "p_value": 0.5,
+      "test": "mcnemar_exact",
+      "p_holm": 1.0,
+      "significant_holm_05": false
+    },
+    {
+      "arm_a": "floor",
+      "arm_b": "junior_said",
+      "isolates": "any assertion at all, vs none",
+      "n": 30,
+      "rate_a": 0.5666666666666667,
+      "rate_b": 0.36666666666666664,
+      "difference": -0.2,
+      "p_value": 0.03125,
+      "test": "mcnemar_exact",
+      "p_holm": 0.21875,
+      "significant_holm_05": false
+    },
+    {
+      "arm_a": "partner_confirmed",
+      "arm_b": "court",
+      "isolates": "organisational vs legal authority",
+      "n": 30,
+      "rate_a": 0.5333333333333333,
+      "rate_b": 0.5333333333333333,
+      "difference": 0.0,
+      "p_value": 1.0,
+      "test": "mcnemar_exact",
+      "p_holm": 1.0,
+      "significant_holm_05": false
+    },
+    {
+      "arm_a": "junior_said",
+      "arm_b": "adverse",
+      "isolates": "discounting an adverse source",
+      "n": 30,
+      "rate_a": 0.36666666666666664,
+      "rate_b": 0.4,
+      "difference": 0.03333333333333338,
+      "p_value": 1.0,
+      "test": "mcnemar_exact",
+      "p_holm": 1.0,
+      "significant_holm_05": false
+    }
+  ],
+  "factorial": {
+    "available": true,
+    "n": 30,
+    "cell_means": {
+      "junior_said": 0.36666666666666664,
+      "junior_confirmed": 0.5,
+      "partner_said": 0.4666666666666667,
+      "partner_confirmed": 0.5333333333333333
+    },
+    "main_effect_source": {
+      "effect": "source (partner - junior)",
+      "mean": 0.06666666666666667,
+      "ci_low": -0.016666666666666666,
+      "ci_high": 0.15,
+      "p_value": 0.15729920705028516,
+      "cohens_dz": 0.26276913640612176
+    },
+    "main_effect_verb": {
+      "effect": "verb (confirmed - said)",
+      "mean": 0.1,
+      "ci_low": 0.03333333333333333,
+      "ci_high": 0.2,
+      "p_value": 0.03389485352468927,
+      "cohens_dz": 0.41302328662451665
+    },
+    "interaction": {
+      "effect": "source x verb",
+      "mean": -0.06666666666666667,
+      "ci_low": -0.2,
+      "ci_high": 0.06666666666666667,
+      "p_value": 0.31731050786291415,
+      "cohens_dz": -0.1825741858350554
+    },
+    "measure": "accepted_false_proposition"
+  }
+}

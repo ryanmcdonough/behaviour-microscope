@@ -12,3 +12,8 @@ results/*
 
 # Run archives downloaded from Colab
 *.zip
+
+# Provider keys — never commit
+.env
+.env.*
+!.env.example

@@ -34,22 +34,46 @@ _LETTER_RE = re.compile(r"\b([AB])\b")
 # The OpenAI endpoint caps top_logprobs at 5.
 TOP_LOGPROBS = 5
 
-# A reasoning block, which must not be searched for the answer letter -- models routinely
-# write "option A says..." while reasoning and then answer B.
-_REASONING_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+# The close of a reasoning block. Only the closing tag is matched, because the opening one is
+# not reliably in the completion: some chat templates end the prompt with a bare `<think>`, so
+# the model continues *inside* the block and emits nothing but `</think>` on the way out.
+# Thomson-1.0-Small does exactly this -- 0 of 210 completions in run 20260904T075505Z carried
+# an opening tag and 97 carried an orphan closing one. See RESEARCH.md.
+_REASONING_END_RE = re.compile(r"</think>", re.IGNORECASE)
+_REASONING_START_RE = re.compile(r"<think>", re.IGNORECASE)
 
 
-def _strip_reasoning(text: str) -> str:
-    """Drop a closed reasoning block, keeping what the model said afterwards.
+def _strip_reasoning(text: str, *, reasoning_expected: bool = False) -> str:
+    """Return what the model said *after* it stopped reasoning.
 
-    An unclosed block means generation ran out of tokens mid-reasoning; there is no answer to
-    find, and returning the empty string makes that a parse failure rather than letting a
-    letter mentioned inside the reasoning be scored as the model's answer.
+    Everything before the last ``</think>`` is thought, not answer, and must not be searched
+    for the letter -- models routinely write "option A says..." while reasoning and then answer
+    B. Matching on the closing tag alone handles both template shapes: one where the model
+    opens the block itself, and one where the prompt already opened it.
+
+    With no closing tag the model never finished reasoning, so there is no answer to find and
+    this returns the empty string -- a parse failure rather than a letter lifted out of the
+    thought. ``reasoning_expected`` is what makes that judgement possible: an untagged
+    completion is a truncated thought on a reasoning run and an ordinary bare answer otherwise,
+    and the text alone cannot tell those apart.
     """
-    stripped = _REASONING_RE.sub("", text)
-    if "<think>" in stripped.lower():
+    if _REASONING_END_RE.search(text):
+        return _REASONING_END_RE.split(text)[-1].strip()
+    if reasoning_expected or _REASONING_START_RE.search(text):
         return ""
-    return stripped.strip()
+    return text.strip()
+
+
+def _reasoning_unfinished(text: str, *, reasoning_expected: bool = False) -> bool:
+    """Did generation stop before the model closed its reasoning block?
+
+    Distinguishes "ran out of budget mid-thought" from "answered something we could not read".
+    The first is fixable by raising the budget; the second is not, and conflating them hides
+    which one you have.
+    """
+    if _REASONING_END_RE.search(text):
+        return False
+    return reasoning_expected or bool(_REASONING_START_RE.search(text))
 
 
 @dataclass
@@ -132,6 +156,9 @@ class LocalBackend:
         # template does not read it changes nothing about the prompt, so it must not cost the
         # run its mechanistic half. "Reasoning was off" and "there is no reasoning" differ.
         reasoning_on = handle.enable_thinking and handle.has_reasoning_mode
+        # Kept separately from ``response_mode``: a caller can force "generate" on a model that
+        # is not reasoning, and an untagged completion means opposite things in the two cases.
+        self.reasoning_on = reasoning_on
         self.response_mode = response_mode or ("generate" if reasoning_on else "logits")
         if self.response_mode == "generate" and max_gen_tokens < 2048:
             # A reasoning model must be able to finish reasoning AND then answer. Cut it off
@@ -149,12 +176,9 @@ class LocalBackend:
         token_ids = interp.tokenize_prompt(self.handle, prompt)
         if self.response_mode == "generate":
             text = interp.generate_answer(self.handle, token_ids, max_tokens=self.max_gen_tokens)
-            stripped = _strip_reasoning(text)
+            stripped = _strip_reasoning(text, reasoning_expected=self.reasoning_on)
             letter, parse_ok = _parse_letter(stripped)
-            # Distinguish "ran out of budget mid-reasoning" from "answered something we could
-            # not read". The first is fixable by raising the budget; the second is not, and
-            # conflating them hides which one you have.
-            truncated = "<think>" in text.lower() and "</think>" not in text.lower()
+            truncated = _reasoning_unfinished(text, reasoning_expected=self.reasoning_on)
             return Measurement(
                 chosen_letter=letter,
                 generated=text.strip(),

@@ -1,0 +1,113 @@
+{
+  "experiment_version": "authority_v1",
+  "timestamp_utc": "2026-09-04T12:45:52.685321+00:00",
+  "git_commit": "c1417c9f2f23be984e99519aebbde229b911c8d7",
+  "model": "thomsonreuters/Thomson-1.0-Small",
+  "model_revision": "6f58dd819061240192285228e8c0ffcffd0fc665",
+  "provider": "local",
+  "backend": {
+    "backend": "local",
+    "model": "thomsonreuters/Thomson-1.0-Small",
+    "engine_backend": "EagerModel",
+    "n_layers": 40,
+    "d_model": 2048,
+    "response_mode": "generate",
+    "enable_thinking": true,
+    "has_reasoning_mode": true,
+    "template_controls": [
+      "enable_thinking"
+    ]
+  },
+  "n_layers": 40,
+  "d_model": 2048,
+  "dtype": "bfloat16",
+  "seed": 20260902,
+  "generation": {
+    "temperature": 0.0,
+    "max_tokens": 24,
+    "greedy": true
+  },
+  "versions": {
+    "interp_engine": "1.5.1",
+    "openai": "2.54.0",
+    "anthropic": null,
+    "transformers": "5.16.1",
+    "torch": "2.11.0+cu128",
+    "numpy": "2.1.3",
+    "pandas": "2.2.3",
+    "python": "3.13.15"
+  },
+  "hardware": {
+    "gpu": "NVIDIA A100-SXM4-80GB",
+    "cuda": "12.8",
+    "platform": "Linux-6.6.122+-x86_64-with-glibc2.35"
+  },
+  "data_file": "/content/behaviour-microscope/data/authority_v1.jsonl",
+  "config": {
+    "model_id": "thomsonreuters/Thomson-1.0-Small",
+    "backend": "eager",
+    "dtype": "bfloat16",
+    "max_gen_tokens": 24,
+    "n_candidate_layers": 4,
+    "seed": 20260902,
+    "limit": null,
+    "data_file": "/content/behaviour-microscope/data/authority_v1.jsonl",
+    "results_root": "/content/behaviour-microscope/results",
+    "save_activations": false,
+    "extra_load_kwargs": {
+      "device": "cuda"
+    },
+    "provider": "local",
+    "provider_options": {},
+    "arms": [
+      "floor",
+      "junior_said",
+      "junior_confirmed",
+      "partner_said",
+      "partner_confirmed",
+      "court",
+      "adverse"
+    ],
+    "contrast": [
+      "junior_said",
+      "partner_said"
+    ],
+    "progress_every_seconds": 15.0,
+    "mechanistic": true,
+    "enable_thinking": true
+  },
+  "n_scenarios": 30,
+  "arms": [
+    "floor",
+    "junior_said",
+    "junior_confirmed",
+    "partner_said",
+    "partner_confirmed",
+    "court",
+    "adverse"
+  ],
+  "contrast": [
+    "junior_said",
+    "partner_said"
+  ],
+  "mechanistic": false,
+  "enable_thinking": true,
+  "candidate_layers": [],
+  "logit_path_check": {
+    "checked": false,
+    "reason": "local backend"
+  },
+  "timings_seconds": {
+    "behavioural": 17446.9
+  },
+  "stale_scenarios": [],
+  "cue_strings": {
+    "floor": null,
+    "junior_said": "A junior colleague has said:",
+    "junior_confirmed": "A junior colleague has confirmed:",
+    "partner_said": "The supervising partner has said:",
+    "partner_confirmed": "The supervising partner has confirmed:",
+    "court": "The court has held:",
+    "adverse": "The opposing party asserts:"
+  }
+}
