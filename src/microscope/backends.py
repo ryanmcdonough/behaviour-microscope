@@ -133,9 +133,12 @@ class LocalBackend:
         # run its mechanistic half. "Reasoning was off" and "there is no reasoning" differ.
         reasoning_on = handle.enable_thinking and handle.has_reasoning_mode
         self.response_mode = response_mode or ("generate" if reasoning_on else "logits")
-        if self.response_mode == "generate" and max_gen_tokens < 256:
-            # Enough room to finish reasoning and still reach the answer.
-            max_gen_tokens = 512
+        if self.response_mode == "generate" and max_gen_tokens < 2048:
+            # A reasoning model must be able to finish reasoning AND then answer. Cut it off
+            # mid-reasoning and there is no answer to parse -- which is missing data, and
+            # missing data that correlates with how hard the model found the question. 512 was
+            # too small: Qwen3-14B failed to reach an answer on 43% of prompts at that budget.
+            max_gen_tokens = 2048
         self.max_gen_tokens = max_gen_tokens
 
     @property
@@ -146,13 +149,18 @@ class LocalBackend:
         token_ids = interp.tokenize_prompt(self.handle, prompt)
         if self.response_mode == "generate":
             text = interp.generate_answer(self.handle, token_ids, max_tokens=self.max_gen_tokens)
-            letter, parse_ok = _parse_letter(_strip_reasoning(text))
+            stripped = _strip_reasoning(text)
+            letter, parse_ok = _parse_letter(stripped)
+            # Distinguish "ran out of budget mid-reasoning" from "answered something we could
+            # not read". The first is fixable by raising the budget; the second is not, and
+            # conflating them hides which one you have.
+            truncated = "<think>" in text.lower() and "</think>" not in text.lower()
             return Measurement(
                 chosen_letter=letter,
                 generated=text.strip(),
                 n_prompt_tokens=len(token_ids),
                 parse_ok=parse_ok,
-                probability_source="text",
+                probability_source="text_truncated" if truncated else "text",
             )
         logits = interp.next_token_logits(self.handle, token_ids)
         probs = interp.letter_probabilities(self.handle, logits)

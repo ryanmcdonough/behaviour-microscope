@@ -301,3 +301,19 @@ def test_thinking_on_a_reasoning_model_switches_to_generate_and_drops_mechanisti
     assert b.response_mode == "generate"
     assert b.supports_mechanistic_now is False
     assert b.max_gen_tokens >= 256          # room to finish reasoning and still answer
+
+
+def test_unparseable_answers_are_missing_not_refusals():
+    """Scoring a non-answer as 'did not accept' biases every rate downward."""
+    from microscope.experiment import _measurement_row
+    from microscope.scenarios import load_scenarios
+
+    s = load_scenarios()[0]
+    row = _measurement_row(s, "partner_said", "prompt",
+                           Measurement(chosen_letter=None, generated="", parse_ok=False))
+    assert row["accepted_false_proposition"] is None
+    assert row["correct"] is None
+
+    answered = _measurement_row(s, "partner_said", "prompt",
+                                Measurement(chosen_letter=s.false_letter, generated="B"))
+    assert answered["accepted_false_proposition"] is True

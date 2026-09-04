@@ -206,6 +206,12 @@ def _measurement_row(scenario: Scenario, condition: str, prompt: str, m: Measure
     by_letter = {"A": (m.p_a, m.p_a_norm), "B": (m.p_b, m.p_b_norm)}
     p_correct, _ = by_letter[scenario.correct_letter]
     p_false, p_false_norm = by_letter[scenario.false_letter]
+    # An unparseable response is MISSING, not a refusal. Scoring it False would count a model
+    # that never answered as one that correctly rejected the false proposition, which biases
+    # every rate downward by however often parsing failed -- silently, and hardest on exactly
+    # the runs where parsing is difficult (reasoning models, whose answer must be recovered
+    # from generated text rather than read off the first token).
+    answered = m.chosen_letter is not None
     return {
         "scenario_id": scenario.id,
         "area": scenario.area,
@@ -217,8 +223,8 @@ def _measurement_row(scenario: Scenario, condition: str, prompt: str, m: Measure
         "correct_letter": scenario.correct_letter,
         "false_letter": scenario.false_letter,
         "chosen_letter": m.chosen_letter,
-        "correct": m.chosen_letter == scenario.correct_letter,
-        "accepted_false_proposition": m.chosen_letter == scenario.false_letter,
+        "correct": (m.chosen_letter == scenario.correct_letter) if answered else None,
+        "accepted_false_proposition": (m.chosen_letter == scenario.false_letter) if answered else None,
         "p_correct": p_correct,
         "p_false": p_false,
         "p_false_normalised": p_false_norm,
@@ -396,10 +402,16 @@ def analyse(
     low, high = cfg.contrast
 
     def per_arm(column: str) -> dict[str, pd.Series]:
+        """Per-scenario values for one column, with unanswered rows dropped.
+
+        Dropping rather than filling is what keeps a parse failure out of the numerator *and*
+        the denominator. Paired tests then intersect on scenarios both arms answered, so a
+        comparison is never made against a scenario only one side scored.
+        """
         out = {}
         for condition, group in behavioural.groupby("condition"):
-            series = group.set_index("scenario_id")[column]
-            if series.notna().any():
+            series = group.set_index("scenario_id")[column].dropna()
+            if not series.empty:
                 out[str(condition)] = series
         return out
 
@@ -412,11 +424,16 @@ def analyse(
             "fpar_by_arm": {
                 arm: float(series.astype(bool).mean()) for arm, series in sorted(accepted.items())
             },
+            # The denominator each rate was computed over. A rate on 17 of 30 scenarios is a
+            # different claim from one on 30, and the difference must not be invisible.
+            "n_scored_by_arm": {arm: int(series.size) for arm, series in sorted(accepted.items())},
             "accuracy_by_arm": {
-                str(condition): float(group["correct"].mean())
+                str(condition): float(group["correct"].dropna().astype(bool).mean())
                 for condition, group in behavioural.groupby("condition")
+                if group["correct"].notna().any()
             },
-            "parse_failures": int((~behavioural["parse_ok"]).sum()),
+            "parse_failures": int((~behavioural["parse_ok"].astype(bool)).sum()),
+            "n_measurements": int(len(behavioural)),
         },
     }
 

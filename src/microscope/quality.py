@@ -85,8 +85,14 @@ def check_parse_rate(behavioural: pd.DataFrame) -> Check:
     total = len(behavioural)
     rate = failures / total if total else 0.0
     if rate > 0.1:
-        return Check("parse_rate", "fail",
-                     f"{failures}/{total} responses had no parseable answer letter ({rate:.0%}).")
+        return Check(
+            "parse_rate", "fail",
+            f"{failures}/{total} responses had no parseable answer letter ({rate:.0%}). Those "
+            "rows are excluded from every rate, so each arm's denominator is smaller than it "
+            "looks and the arms are no longer scored on the same scenarios. On a reasoning run "
+            "this usually means generation hit its token budget before the model finished "
+            "reasoning -- raise max_gen_tokens and re-run rather than reading these numbers.",
+        )
     if failures:
         return Check("parse_rate", "warn",
                      f"{failures}/{total} responses had no parseable answer letter. Those rows "
