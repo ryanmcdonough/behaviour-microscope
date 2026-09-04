@@ -665,19 +665,32 @@ def run_all(cfg: RunConfig | None = None, *, verbose: bool = True) -> Path:
 # --------------------------------------------------------------------------- sweep
 
 
-def free_device_memory() -> None:
-    """Release whatever the last model left on the card.
+def device_memory_gb() -> float | None:
+    """GB currently reserved on the card, or None on CPU."""
+    if not torch.cuda.is_available():
+        return None
+    return torch.cuda.memory_reserved(0) / 1e9
+
+
+def free_device_memory() -> float | None:
+    """Release whatever the last model left on the card, and report what came back.
 
     ``shutdown()`` tells the engine to let go, but Python still holds the model until the last
     reference dies, and the allocator still holds the freed blocks until told to release them.
     Loading a 12B and then a 14B on one card fails on either omission -- and it fails as an OOM
     during the *second* load, which reads like the second model being too big rather than the
     first still being resident.
+
+    Returns the memory still reserved afterwards so a sweep can show the release happening
+    rather than assume it. A figure that does not fall back near zero between models is the
+    warning that the next load is about to OOM.
     """
     gc.collect()
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-        torch.cuda.synchronize()
+    if not torch.cuda.is_available():
+        return None
+    torch.cuda.empty_cache()
+    torch.cuda.synchronize()
+    return device_memory_gb()
 
 
 def sweep_label(cfg: RunConfig) -> str:
@@ -714,7 +727,11 @@ def run_sweep(configs: "list[RunConfig]", *, verbose: bool = True) -> dict[str, 
         except Exception as exc:  # noqa: BLE001 - a sweep must survive one model failing
             print(f"FAILED {label}: {type(exc).__name__}: {exc}", flush=True)
         finally:
-            free_device_memory()
+            before = device_memory_gb()
+            after = free_device_memory()
+            if verbose and after is not None:
+                note = "" if after < 2.0 else "  <-- did not release; the next load may OOM"
+                print(f"  GPU reserved: {before:.1f} GB -> {after:.1f} GB{note}", flush=True)
     if verbose:
         print(f"\nSweep complete: {len(results)}/{len(configs)} succeeded.", flush=True)
         for label, path in results.items():
