@@ -317,3 +317,24 @@ def test_unparseable_answers_are_missing_not_refusals():
     answered = _measurement_row(s, "partner_said", "prompt",
                                 Measurement(chosen_letter=s.false_letter, generated="B"))
     assert answered["accepted_false_proposition"] is True
+
+
+def test_generation_budget_reaches_the_local_backend():
+    """A budget set in RunConfig must not be silently dropped on the way to the backend."""
+    from microscope.backends import BackendSpec
+
+    spec = BackendSpec(kind="local", model_id="x", max_gen_tokens=4096)
+    assert spec.max_gen_tokens == 4096
+
+
+def test_reasoning_budget_floor_still_applies_when_none_is_given():
+    from microscope.backends import LocalBackend
+
+    class _H:
+        model_id = "x"; backend = "EagerModel"; n_layers = 4; d_model = 8
+        enable_thinking = True
+        template_controls = frozenset({"enable_thinking"})
+        has_reasoning_mode = True
+
+    assert LocalBackend(_H()).max_gen_tokens >= 2048
+    assert LocalBackend(_H(), max_gen_tokens=8192).max_gen_tokens == 8192

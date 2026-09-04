@@ -427,11 +427,16 @@ class BackendSpec:
     kind: str
     model_id: str
     options: dict = field(default_factory=dict)
+    # Generation budget for the local backend. Reaches LocalBackend rather than being dropped:
+    # on a reasoning run it is the difference between an answer and a truncated thought.
+    max_gen_tokens: int | None = None
 
     def build(self) -> Backend:
         if self.kind == "local":
             handle = interp.open_model(self.model_id, **self.options)
-            return LocalBackend(handle)
+            if self.max_gen_tokens is None:
+                return LocalBackend(handle)
+            return LocalBackend(handle, max_gen_tokens=self.max_gen_tokens)
         if self.kind == "openai":
             return OpenAIBackend(self.model_id, **self.options)
         if self.kind == "anthropic":

@@ -563,7 +563,10 @@ def run_all(cfg: RunConfig | None = None, *, verbose: bool = True) -> Path:
         if cfg.dtype is not None:
             options.setdefault("dtype", cfg.dtype)
     log(f"Opening {cfg.provider} backend for {cfg.model_id} ...")
-    backend = BackendSpec(kind=cfg.provider, model_id=cfg.model_id, options=options).build()
+    backend = BackendSpec(
+        kind=cfg.provider, model_id=cfg.model_id, options=options,
+        max_gen_tokens=cfg.max_gen_tokens,
+    ).build()
 
     run_dir = cfg.results_root / datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     (run_dir / "plots").mkdir(parents=True, exist_ok=True)
