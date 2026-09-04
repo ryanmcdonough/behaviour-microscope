@@ -70,6 +70,10 @@ class RunConfig:
     contrast: tuple[str, str] = DEFAULT_CONTRAST
     # How often a long phase reports progress. Lower it to watch a run more closely.
     progress_every_seconds: float = 15.0
+    # Skip the capture and patching experiments even on a backend that could run them. The
+    # sweep is O(layers x scenarios) forward passes, which is minutes on a 12B and hours on a
+    # large mixture-of-experts model; sometimes only the behavioural numbers are wanted.
+    mechanistic: bool = True
     # Turn a hybrid-reasoning model's reasoning on. Ignored by a model with no reasoning mode.
     # A reasoning run is behavioural-only: the answer no longer sits at the final prompt
     # position, so the patching experiments would be intervening on the wrong thing.
@@ -552,8 +556,14 @@ def run_all(cfg: RunConfig | None = None, *, verbose: bool = True) -> Path:
     logit_check: dict = {"checked": False, "reason": f"{cfg.provider} backend"}
 
     try:
-        mechanistic = isinstance(backend, LocalBackend) and backend.supports_mechanistic_now
+        mechanistic = (
+            cfg.mechanistic
+            and isinstance(backend, LocalBackend)
+            and backend.supports_mechanistic_now
+        )
         if isinstance(backend, LocalBackend):
+            if not cfg.mechanistic:
+                log("NOTE: mechanistic=False -- running experiment 1 only.")
             if backend.handle.enable_thinking and not backend.handle.has_reasoning_mode:
                 log("NOTE: enable_thinking was requested but this model has no reasoning mode; "
                     "it reads no such template control, so the run is unchanged.")

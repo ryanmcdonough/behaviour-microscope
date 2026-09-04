@@ -82,3 +82,11 @@ def test_sweep_label_for_an_api_run_is_just_the_model():
     from microscope.experiment import RunConfig, sweep_label
 
     assert sweep_label(RunConfig(model_id="gpt-5.1", provider="openai")) == "gpt-5.1"
+
+
+def test_mechanistic_can_be_switched_off_in_config():
+    """The layer sweep is hours on a large MoE; a behavioural-only run must be expressible."""
+    from microscope.experiment import RunConfig
+
+    assert RunConfig().mechanistic is True
+    assert RunConfig(mechanistic=False).mechanistic is False
