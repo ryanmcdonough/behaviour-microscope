@@ -273,6 +273,48 @@ def test_an_unclosed_reasoning_block_is_a_parse_failure_not_a_guess():
     assert _parse_letter(_strip_reasoning(text)) == (None, False)
 
 
+def test_reasoning_is_stripped_when_only_the_closing_tag_is_in_the_completion():
+    """Some templates end the prompt with a bare `<think>`, so the model emits only `</think>`.
+
+    Thomson-1.0-Small does this. Requiring the opening tag scored the first letter of the
+    echoed option list as the answer -- 152 of 210 rows wrong in run 20260904T075505Z.
+    """
+    from microscope.backends import _strip_reasoning
+    text = "Options:\nA: 28 days\nB: 14 days\nFinal answer: B.\n</think>\n\nB"
+    assert _strip_reasoning(text, reasoning_expected=True) == "B"
+    assert _parse_letter(_strip_reasoning(text, reasoning_expected=True)) == ("B", True)
+
+
+def test_untagged_completion_is_truncation_on_a_reasoning_run_and_an_answer_otherwise():
+    """The same text means opposite things; only the caller knows which run this is."""
+    from microscope.backends import _strip_reasoning
+    text = "Options:\nA: 28 days\nB: 14 days\nThe text says 14, so"
+    assert _strip_reasoning(text, reasoning_expected=True) == ""
+    assert _strip_reasoning(text, reasoning_expected=False) == text
+
+
+def test_a_bare_letter_still_parses_when_no_reasoning_is_expected():
+    """The non-reasoning path must not be collateral damage."""
+    from microscope.backends import _strip_reasoning
+    assert _strip_reasoning("B", reasoning_expected=False) == "B"
+
+
+def test_missing_closing_tag_is_reported_as_truncated_not_as_a_read_answer():
+    """A budget failure and an unreadable answer are different problems."""
+    from microscope.backends import _reasoning_unfinished
+    assert _reasoning_unfinished("thinking, no close", reasoning_expected=True) is True
+    assert _reasoning_unfinished("thought.</think>\n\nB", reasoning_expected=True) is False
+    assert _reasoning_unfinished("B", reasoning_expected=False) is False
+    assert _reasoning_unfinished("<think>unclosed", reasoning_expected=False) is True
+
+
+def test_the_last_closing_tag_wins():
+    """A model that writes about `</think>` mid-thought must not truncate its own answer."""
+    from microscope.backends import _strip_reasoning
+    text = "I should emit </think> when done.\nAnswer: B.\n</think>\n\nB"
+    assert _strip_reasoning(text, reasoning_expected=True) == "B"
+
+
 def test_thinking_on_a_model_without_a_reasoning_mode_is_a_no_op():
     """It must not silently cost the run its mechanistic half."""
     from microscope.backends import LocalBackend
@@ -338,3 +380,19 @@ def test_reasoning_budget_floor_still_applies_when_none_is_given():
 
     assert LocalBackend(_H()).max_gen_tokens >= 2048
     assert LocalBackend(_H(), max_gen_tokens=8192).max_gen_tokens == 8192
+
+
+def test_the_qualitative_record_does_not_cost_the_full_answer_budget():
+    """In logits mode the answer is the first token; the completion is only the transcript."""
+    from microscope.backends import LocalBackend
+
+    class _H:
+        model_id = "x"; backend = "EagerModel"; n_layers = 4; d_model = 8
+        enable_thinking = False
+        template_controls = frozenset()
+        has_reasoning_mode = False
+
+    b = LocalBackend(_H(), max_gen_tokens=2048)
+    assert b.response_mode == "logits"
+    assert b.record_tokens < b.max_gen_tokens
+    assert b.describe()["record_tokens"] == b.record_tokens

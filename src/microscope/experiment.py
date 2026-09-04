@@ -172,7 +172,15 @@ def build_manifest(cfg: RunConfig, backend: Backend, extra: dict) -> dict:
         "d_model": described.get("d_model"),
         "dtype": cfg.dtype,
         "seed": cfg.seed,
-        "generation": {"temperature": 0.0, "max_tokens": cfg.max_gen_tokens, "greedy": True},
+        "generation": {
+            "temperature": 0.0,
+            # What the backend resolved to, falling back to the request for backends that do
+            # not report one. A manifest that records the request rather than the effect
+            # cannot be used to tell a truncated run from an incapable model.
+            "max_tokens": described.get("max_gen_tokens", cfg.max_gen_tokens),
+            "max_tokens_requested": cfg.max_gen_tokens,
+            "greedy": True,
+        },
         "versions": {
             "interp_engine": _package_version("interp-engine"),
             "openai": _package_version("openai"),

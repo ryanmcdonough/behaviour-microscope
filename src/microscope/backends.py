@@ -147,7 +147,7 @@ class LocalBackend:
     supports_mechanistic = True
 
     def __init__(self, handle: interp.ModelHandle, max_gen_tokens: int = 24,
-                 response_mode: str | None = None):
+                 response_mode: str | None = None, record_tokens: int = 8):
         self.handle = handle
         self.name = "local"
         self.model_id = handle.model_id
@@ -167,6 +167,12 @@ class LocalBackend:
             # too small: Qwen3-14B failed to reach an answer on 43% of prompts at that budget.
             max_gen_tokens = 2048
         self.max_gen_tokens = max_gen_tokens
+        # In logits mode the answer is read from the first token's probabilities and the
+        # completion is only the qualitative record of what the model said. Generating the full
+        # budget for that record costs a forward pass per token and buys nothing: at the 24 of
+        # run 20260904T071909Z it was ~96% of the behavioural phase's compute. Enough tokens to
+        # see the letter and the start of any hedge is all the record needs to be.
+        self.record_tokens = record_tokens
 
     @property
     def supports_mechanistic_now(self) -> bool:
@@ -188,7 +194,7 @@ class LocalBackend:
             )
         logits = interp.next_token_logits(self.handle, token_ids)
         probs = interp.letter_probabilities(self.handle, logits)
-        generated = interp.generate_answer(self.handle, token_ids, max_tokens=self.max_gen_tokens)
+        generated = interp.generate_answer(self.handle, token_ids, max_tokens=self.record_tokens)
         return Measurement(
             chosen_letter="A" if probs["p_a"] >= probs["p_b"] else "B",
             generated=generated.strip(),
@@ -209,6 +215,12 @@ class LocalBackend:
             "n_layers": self.handle.n_layers,
             "d_model": self.handle.d_model,
             "response_mode": self.response_mode,
+            # The budget actually generated with, which is not necessarily the one asked for:
+            # the reasoning floor below raises it. Run 20260904T075505Z recorded the requested
+            # 24 while generating with 512, which made a budget-truncated run look like a
+            # model that could not answer.
+            "max_gen_tokens": self.max_gen_tokens,
+            "record_tokens": self.record_tokens,
             "enable_thinking": self.handle.enable_thinking,
             "has_reasoning_mode": self.handle.has_reasoning_mode,
             "template_controls": sorted(self.handle.template_controls),
