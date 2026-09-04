@@ -599,6 +599,12 @@ def run_all(cfg: RunConfig | None = None, *, verbose: bool = True) -> Path:
                 log("NOTE: reasoning is ON, so the answer is parsed from the completion rather "
                     "than read from the first token, and experiments 2-4 are skipped -- the "
                     "answer no longer sits at the final prompt position for patching to reach.")
+            if cfg.mechanistic and not backend.handle.can_capture:
+                # Distinct from the reasoning case above: this one is the backend, and it is
+                # silently recoverable by re-running on eager, so name the remedy.
+                log(f"NOTE: the {cfg.backend!r} engine backend replays CUDA graphs and runs no "
+                    "forward hooks, so nothing can be captured or patched through it. "
+                    "Experiments 2-4 are skipped; re-run with backend='eager' to get them.")
         else:
             log(
                 f"NOTE: the {cfg.provider} backend is behavioural-only. Closed weights cannot be "

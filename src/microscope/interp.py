@@ -64,6 +64,17 @@ class ModelHandle:
         return "enable_thinking" in self.template_controls
 
     @property
+    def can_capture(self) -> bool:
+        """Whether this engine backend runs the Python forward hooks capture and patching need.
+
+        False on a vLLM backend that replays CUDA graphs (``vllm-generate``, ``vllm-static``):
+        the graphs skip forward hooks entirely, so a capture returns nothing. That is the right
+        trade for a behavioural-only run, which is why those backends exist -- but it must be
+        read as a capability rather than discovered as an empty tensor halfway through a sweep.
+        """
+        return bool(getattr(self.sync, "hooks_available", True))
+
+    @property
     def last_layer(self) -> int:
         return self.n_layers - 1
 
@@ -93,6 +104,13 @@ def open_model(
     which removes most of its speed advantage at this model size, and the eager backend is the
     one that serves every point and fills in ``GenStep.logits`` for the cross-check in
     ``verify_logit_path``.
+
+    That reasoning is about *capture*, and so it does not apply to a run that captures nothing.
+    A reasoning run is behavioural-only by construction, and ``backend="vllm-generate"`` is then
+    the right choice: CUDA graphs, no taps, batched decode. Thomson-1.0-Small generated at
+    6.2 tok/s through the eager backend one prompt at a time, which is where run
+    20260904T075505Z's 4h50m went. ``can_capture`` is False on that backend, so a run that
+    still wanted the mechanistic half is told rather than being handed empty activations.
 
     That choice has a sharp edge: ``load_model``'s own CUDA auto-detection only runs for
     ``backend="auto"``. Forcing ``"eager"`` here bypasses that ladder entirely, and
@@ -212,7 +230,17 @@ def _ids_on_device(handle: ModelHandle, token_ids: list[int]) -> torch.Tensor:
     before calling that free function; this is that workaround for the path the rest of this file
     uses. See RESEARCH.md.
     """
-    return torch.tensor(token_ids, dtype=torch.long, device=handle.model.device)
+    device = getattr(handle.model, "device", None)
+    if device is None:
+        # A vLLM backend owns its own placement and exposes no `.device`. Reaching here means a
+        # capture path ran on a backend that cannot capture, which `can_capture` exists to
+        # prevent -- say so, rather than raising AttributeError from inside torch.
+        raise RuntimeError(
+            f"{type(handle.model).__name__} exposes no `.device`, so it cannot be given ids for "
+            "a capture forward. This backend is behavioural-only; run the mechanistic "
+            "experiments on backend='eager'."
+        )
+    return torch.tensor(token_ids, dtype=torch.long, device=device)
 
 
 def capture_residuals(handle: ModelHandle, token_ids: list[int]) -> dict[int, torch.Tensor]:

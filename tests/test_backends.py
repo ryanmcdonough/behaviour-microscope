@@ -396,3 +396,36 @@ def test_the_qualitative_record_does_not_cost_the_full_answer_budget():
     assert b.response_mode == "logits"
     assert b.record_tokens < b.max_gen_tokens
     assert b.describe()["record_tokens"] == b.record_tokens
+
+
+def test_a_backend_that_cannot_capture_cannot_run_the_mechanistic_half():
+    """CUDA-graph vLLM runs no forward hooks, so there is nothing to capture from.
+
+    Discovering that as an empty activation halfway through a 40-layer sweep is the failure
+    this guards against: it is a property of the backend and is knowable at construction.
+    """
+    from microscope.backends import LocalBackend
+
+    class _H:
+        model_id = "x"; backend = "VLLMModel"; n_layers = 4; d_model = 8
+        enable_thinking = False
+        template_controls = frozenset()
+        has_reasoning_mode = False
+        can_capture = False
+
+    b = LocalBackend(_H())
+    assert b.response_mode == "logits"        # not reasoning -- the answer is the first token
+    assert b.supports_mechanistic_now is False
+
+
+def test_capture_capable_backend_still_runs_the_mechanistic_half():
+    from microscope.backends import LocalBackend
+
+    class _H:
+        model_id = "x"; backend = "EagerModel"; n_layers = 4; d_model = 8
+        enable_thinking = False
+        template_controls = frozenset()
+        has_reasoning_mode = False
+        can_capture = True
+
+    assert LocalBackend(_H()).supports_mechanistic_now is True

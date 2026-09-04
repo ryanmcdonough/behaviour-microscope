@@ -176,7 +176,15 @@ class LocalBackend:
 
     @property
     def supports_mechanistic_now(self) -> bool:
-        return self.response_mode == "logits"
+        """Whether *this* run can be patched, as opposed to whether the class ever can.
+
+        Two things can rule it out. Reasoning moves the answer off the final prompt position,
+        so the intervention would land on the wrong token. And a CUDA-graph vLLM backend runs
+        no forward hooks, so there is nothing to capture from in the first place. Both are
+        legitimate configurations -- they are how a behavioural-only run is made fast -- but
+        neither can carry experiments 2-4.
+        """
+        return self.response_mode == "logits" and getattr(self.handle, "can_capture", True)
 
     def measure(self, prompt: str) -> Measurement:
         token_ids = interp.tokenize_prompt(self.handle, prompt)
