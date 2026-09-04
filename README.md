@@ -15,6 +15,9 @@ UK legal scenarios -> prompt pairs -> orchestration -> interp-engine -> open mod
                           plots <- statistics <- measurements <-------------+
 ```
 
+> **Picking this up cold?** Start with [HANDOVER.md](HANDOVER.md) — the research question, the
+> results so far, what has already gone wrong and why, and what is outstanding.
+
 ## The experiment
 
 Thirty matched UK legal scenarios (England and Wales). Each pairs a piece of authoritative
