@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import gc
+import os
 import platform
 import subprocess
 import sys
@@ -27,7 +28,7 @@ import pandas as pd
 import torch
 
 from . import interp, metrics
-from .backends import Backend, BackendSpec, LocalBackend, Measurement
+from .backends import Backend, BackendSpec, LocalBackend, Measurement, measure_many
 from .scenarios import (
     ARMS_BY_NAME,
     CONDITIONS,
@@ -74,10 +75,27 @@ class RunConfig:
     # sweep is O(layers x scenarios) forward passes, which is minutes on a 12B and hours on a
     # large mixture-of-experts model; sometimes only the behavioural numbers are wanted.
     mechanistic: bool = True
+    # How many measurements may be in flight at once in experiment 1. 1 keeps the sequential
+    # behaviour every result so far was produced with. Higher only takes effect on a backend
+    # that declares itself concurrency-safe -- the API backends, where the loop is mostly
+    # round-trip latency, and the local vLLM generate path, where several in-flight requests
+    # are what lets the engine batch. Never applies to the mechanistic experiments.
+    max_concurrency: int = 1
     # Turn a hybrid-reasoning model's reasoning on. Ignored by a model with no reasoning mode.
     # A reasoning run is behavioural-only: the answer no longer sits at the final prompt
     # position, so the patching experiments would be intervening on the wrong thing.
     enable_thinking: bool = False
+    # Stable folder name under results_root. A timestamp is used if this is unset. Set it when
+    # the run may be interrupted -- Colab timeouts, a STOP file -- so the next session writes
+    # into the same directory instead of starting a sibling.
+    run_name: str | None = None
+    # 1-based measurement index to start at, matching the progress line `[N/210]`. None means
+    # continue after whatever rows are already in this run's behavioural.csv. An explicit
+    # number truncates from that index and re-measures.
+    start_at: int | None = None
+    # Skip measurement and write summary / plots / quality from behavioural.csv already on disk.
+    # No model is loaded. Use after a timeout, or to export mid-run results.
+    finalize_only: bool = False
 
 
 class Progress:
@@ -88,13 +106,15 @@ class Progress:
     seconds of starting and a stalled run is distinguishable from a slow one.
     """
 
-    def __init__(self, total: int, log, *, every_seconds: float = 15.0):
+    def __init__(self, total: int, log, *, every_seconds: float = 15.0, done: int = 0):
         self.total = total
         self.log = log
         self.every = every_seconds
-        self.done = 0
+        self.done = done
+        self.offset = done
         self.start = time.monotonic()
         self._last_report = 0.0
+        self._ticked = False
 
     @staticmethod
     def _clock(seconds: float) -> str:
@@ -108,13 +128,15 @@ class Progress:
     def tick(self, detail: str = "") -> None:
         self.done += 1
         now = time.monotonic()
-        first = self.done == 1
+        first = not self._ticked
+        self._ticked = True
         last = self.done == self.total
         if not (first or last or now - self._last_report >= self.every):
             return
         self._last_report = now
+        session = max(1, self.done - self.offset) if hasattr(self, "offset") else self.done
         elapsed = now - self.start
-        rate = self.done / elapsed if elapsed > 0 else 0.0
+        rate = session / elapsed if elapsed > 0 else 0.0
         remaining = (self.total - self.done) / rate if rate > 0 else 0.0
         pct = 100.0 * self.done / self.total if self.total else 100.0
         suffix = f"  {detail}" if detail else ""
@@ -181,6 +203,10 @@ def build_manifest(cfg: RunConfig, backend: Backend, extra: dict) -> dict:
             "max_tokens_requested": cfg.max_gen_tokens,
             "greedy": True,
         },
+        # Recorded because it changes how the run was produced, not what it measured: rows are
+        # ordered and scored identically either way, but a reader comparing wall-clock timings
+        # across runs needs to know which ones were serial.
+        "max_concurrency": cfg.max_concurrency,
         "versions": {
             "interp_engine": _package_version("interp-engine"),
             "openai": _package_version("openai"),
@@ -244,17 +270,173 @@ def _measurement_row(scenario: Scenario, condition: str, prompt: str, m: Measure
     }
 
 
+STOP_FILENAME = "STOP"
+
+
+def measurement_plan(scenarios: list[Scenario], arms: tuple[str, ...] = CONDITIONS) -> list[tuple[Scenario, str]]:
+    """The numbered list progress reports: item 1 is scenarios[0] × arms[0]."""
+    return [(s, c) for s in scenarios for c in arms]
+
+
+def format_measurement_plan(scenarios: list[Scenario], arms: tuple[str, ...] = CONDITIONS) -> str:
+    """Human-readable index so a stopped run can name the next `start_at`."""
+    lines = []
+    for i, (scenario, condition) in enumerate(measurement_plan(scenarios, arms), start=1):
+        lines.append(f"  {i:3d}  {scenario.id}  {condition}")
+    return "\n".join(lines)
+
+
+def resolve_run_dir(cfg: RunConfig) -> Path:
+    """Where this run writes. A named directory is reused across sessions; a timestamp is not."""
+    cfg.results_root.mkdir(parents=True, exist_ok=True)
+    name = cfg.run_name or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    path = cfg.results_root / name
+    path.mkdir(parents=True, exist_ok=True)
+    (path / "plots").mkdir(exist_ok=True)
+    return path
+
+
+def _stop_requested(run_dir: Path) -> bool:
+    return (run_dir / STOP_FILENAME).exists()
+
+
+def _write_behavioural_csv(path: Path, slots: list[dict | None]) -> None:
+    """Rewrite the CSV from filled slots, fsynced, so a killed kernel keeps every finished row."""
+    rows = [row for row in slots if row is not None]
+    if not rows:
+        return
+    tmp = path.with_suffix(".csv.tmp")
+    pd.DataFrame(rows).to_csv(tmp, index=False)
+    os.replace(tmp, path)
+    with open(path, "rb") as handle:
+        os.fsync(handle.fileno())
+
+
+def _load_behavioural_slots(
+    path: Path, pairs: list[tuple[Scenario, str]]
+) -> list[dict | None]:
+    slots: list[dict | None] = [None] * len(pairs)
+    if not path.exists():
+        return slots
+    frame = pd.read_csv(path)
+    index_of = {(scenario.id, condition): i for i, (scenario, condition) in enumerate(pairs)}
+    for record in frame.to_dict("records"):
+        key = (record["scenario_id"], record["condition"])
+        if key in index_of:
+            slots[index_of[key]] = record
+    return slots
+
+
+def _first_missing(slots: list[dict | None]) -> int:
+    """1-based index of the first unfilled measurement, or len+1 if the plan is complete."""
+    for i, row in enumerate(slots):
+        if row is None:
+            return i + 1
+    return len(slots) + 1
+
+
 def run_behavioural(
-    backend: Backend, scenarios: list[Scenario], cfg: RunConfig, progress: Progress | None = None
+    backend: Backend,
+    scenarios: list[Scenario],
+    cfg: RunConfig,
+    progress: Progress | None = None,
+    *,
+    run_dir: Path | None = None,
 ) -> pd.DataFrame:
-    """Experiment 1, on any backend. The only experiment a closed-weights model can run."""
-    rows = []
-    for scenario in scenarios:
-        for condition in cfg.arms:
-            prompt = scenario.prompt(condition)
-            rows.append(_measurement_row(scenario, condition, prompt, backend.measure(prompt)))
-            if progress:
-                progress.tick(f"{scenario.id} / {condition}")
+    """Experiment 1, on any backend. The only experiment a closed-weights model can run.
+
+    Every prompt here is independent -- no scenario informs another, and the arms are scored
+    separately -- so the order they are measured in carries no information and they can be in
+    flight together where the backend allows it. Rows come back in scenario x arm order either
+    way, so a run's output does not depend on `max_concurrency`.
+
+    When ``run_dir`` is set, each finished row is written to ``behavioural.csv`` before the next
+    prompt starts. A Colab timeout then loses only the in-flight item. Touch ``run_dir/STOP``
+    (or interrupt the kernel) to halt after the current measurement; already-written rows stay.
+    """
+    pairs = measurement_plan(scenarios, cfg.arms)
+    csv_path = (run_dir / "behavioural.csv") if run_dir is not None else None
+    slots = _load_behavioural_slots(csv_path, pairs) if csv_path is not None else [None] * len(pairs)
+
+    if cfg.start_at is not None:
+        start = cfg.start_at
+        if start < 1 or start > len(pairs) + 1:
+            raise ValueError(f"start_at={start} is outside 1..{len(pairs) + 1}")
+        missing = [i + 1 for i in range(start - 1) if slots[i] is None]
+        if missing:
+            raise ValueError(
+                f"start_at={start} but measurements {missing[:8]} are not on disk. "
+                "Resume from the first gap, or copy the checkpoint CSV into this run directory."
+            )
+        for i in range(start - 1, len(slots)):
+            slots[i] = None
+    else:
+        start = _first_missing(slots)
+
+    if csv_path is not None and start <= len(pairs):
+        scenario, condition = pairs[start - 1]
+        n_have = sum(row is not None for row in slots)
+        print(
+            f"  checkpoint: {n_have}/{len(pairs)} rows on disk. "
+            f"Resuming at {start}/{len(pairs)} ({scenario.id} / {condition}). "
+            f"Stop: touch {run_dir / STOP_FILENAME}",
+            flush=True,
+        )
+
+    remaining = [i for i in range(start - 1, len(pairs)) if slots[i] is None]
+    if run_dir is not None and _stop_requested(run_dir) and remaining:
+        (run_dir / STOP_FILENAME).unlink()
+        print("  cleared leftover STOP from the previous session", flush=True)
+    concurrent = (
+        cfg.max_concurrency > 1
+        and len(remaining) > 1
+        and getattr(backend, "concurrency_safe", False)
+    )
+
+    def store(index: int, measurement: Measurement) -> None:
+        scenario, condition = pairs[index]
+        prompt = scenario.prompt(condition)
+        slots[index] = _measurement_row(scenario, condition, prompt, measurement)
+        if csv_path is not None:
+            _write_behavioural_csv(csv_path, slots)
+        if progress:
+            progress.tick(f"{scenario.id} / {condition}")
+
+    if not remaining:
+        pass
+    elif concurrent:
+        prompts = [pairs[i][0].prompt(pairs[i][1]) for i in remaining]
+        index_by_local = {local: remaining[local] for local in range(len(remaining))}
+
+        def on_result(local: int, measurement: Measurement) -> None:
+            store(index_by_local[local], measurement)
+
+        measure_many(
+            backend, prompts, max_workers=cfg.max_concurrency, on_result=on_result,
+        )
+    else:
+        for index in remaining:
+            if run_dir is not None and _stop_requested(run_dir):
+                print(
+                    f"  STOP at measurement {index + 1}/{len(pairs)} "
+                    f"({pairs[index][0].id} / {pairs[index][1]}). "
+                    f"{sum(row is not None for row in slots)} rows kept.",
+                    flush=True,
+                )
+                break
+            scenario, condition = pairs[index]
+            try:
+                measurement = backend.measure(scenario.prompt(condition))
+            except KeyboardInterrupt:
+                if run_dir is not None:
+                    (run_dir / STOP_FILENAME).write_text("keyboard interrupt\n")
+                    _write_behavioural_csv(csv_path, slots)
+                raise
+            store(index, measurement)
+
+    rows = [row for row in slots if row is not None]
+    if csv_path is not None:
+        _write_behavioural_csv(csv_path, slots)
     return pd.DataFrame(rows)
 
 
@@ -524,8 +706,135 @@ def analyse(
 # --------------------------------------------------------------------------- runner
 
 
-def run_all(cfg: RunConfig | None = None, *, verbose: bool = True) -> Path:
+def write_run_artifacts(
+    run_dir: Path,
+    cfg: RunConfig,
+    *,
+    backend=None,
+    timings: dict | None = None,
+    stale: list | None = None,
+    logit_check: dict | None = None,
+    mechanistic: bool = False,
+    candidates: list[int] | None = None,
+    verbose: bool = True,
+    stopped_early: bool = False,
+) -> dict:
+    """Write summary, plots, quality, and manifest from whatever CSVs are in ``run_dir``.
+
+    No model is loaded. Call after a timeout, after touching STOP, or on a finished run you
+    want to re-plot. Partial behavioural.csv is allowed; the quality gate will say so.
+    """
     from . import plots, quality
+
+    run_dir = Path(run_dir)
+    csv_path = run_dir / "behavioural.csv"
+    if not csv_path.exists():
+        raise FileNotFoundError(f"No behavioural.csv in {run_dir}")
+    behavioural = pd.read_csv(csv_path)
+    if behavioural.empty:
+        raise ValueError(f"{csv_path} is empty -- nothing to export.")
+
+    def log(message: str) -> None:
+        if verbose:
+            print(message, flush=True)
+
+    div_path, int_path = run_dir / "activation_analysis.csv", run_dir / "interventions.csv"
+    divergence = pd.read_csv(div_path) if div_path.exists() else None
+    interventions = pd.read_csv(int_path) if int_path.exists() else None
+    candidates = candidates or []
+    if divergence is not None and not candidates:
+        candidates = metrics.candidate_layers(divergence, k=cfg.n_candidate_layers)
+
+    summary = analyse(behavioural, divergence, interventions, candidates, cfg)
+    n_plan = None
+    if cfg.limit:
+        n_plan = cfg.limit * len(cfg.arms)
+    else:
+        try:
+            n_plan = len(load_scenarios(cfg.data_file)) * len(cfg.arms)
+        except OSError:
+            n_plan = None
+    if n_plan is not None:
+        summary["behavioural"]["n_planned"] = n_plan
+        summary["behavioural"]["complete"] = int(len(behavioural)) >= n_plan
+    (run_dir / "summary.json").write_text(json.dumps(summary, indent=2, default=float))
+
+    extra = {
+        "config": {k: str(v) if isinstance(v, Path) else v for k, v in asdict(cfg).items()},
+        "n_scenarios": int(behavioural["scenario_id"].nunique()),
+        "arms": list(cfg.arms),
+        "contrast": list(cfg.contrast),
+        "mechanistic": mechanistic,
+        "enable_thinking": cfg.enable_thinking,
+        "candidate_layers": candidates,
+        "logit_path_check": logit_check or {"checked": False, "reason": "finalize without model"},
+        "timings_seconds": timings or {},
+        "stale_scenarios": [s.id if hasattr(s, "id") else s for s in (stale or [])],
+        "cue_strings": {a: ARMS_BY_NAME[a].cue for a in cfg.arms},
+        "stopped_early": stopped_early,
+        "n_measurements_written": int(len(behavioural)),
+    }
+    if backend is not None:
+        manifest = build_manifest(cfg, backend, extra)
+    else:
+        previous = {}
+        if (run_dir / "manifest.json").exists():
+            previous = json.loads((run_dir / "manifest.json").read_text())
+        extra["model"] = cfg.model_id
+        extra["provider"] = cfg.provider
+        extra["experiment_version"] = EXPERIMENT_VERSION
+        extra["finalized_without_model"] = True
+        previous.update(extra)
+        manifest = previous
+
+    (run_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, default=float))
+    plots.write_all(behavioural, divergence, interventions, run_dir / "plots", cfg)
+    report = quality.run_checks(behavioural, divergence, interventions, summary, manifest)
+    (run_dir / "quality_report.json").write_text(json.dumps(report, indent=2))
+    log("")
+    log(quality.format_report(report))
+    log("")
+    if report["overall"] == "fail":
+        log(
+            "quality gate: FAIL -- at least one check failed outright. Read the report "
+            "above before drawing any conclusion from behavioural.csv, the plots, or "
+            "summary.json; the run completed, but its numbers are flagged as untrustworthy."
+        )
+    n_written = len(behavioural)
+    n_note = f"{n_written}" + (f"/{n_plan}" if n_plan else "")
+    log(f"Wrote artifacts from {n_note} measurements in {run_dir}")
+    return {"summary": summary, "report": report, "manifest": manifest}
+
+
+def finalize_run(run_dir: Path | str, cfg: RunConfig | None = None, *, verbose: bool = True) -> Path:
+    """Rebuild plots and tables from a run directory. Does not load a model."""
+    run_dir = Path(run_dir)
+    if cfg is None:
+        manifest_path = run_dir / "manifest.json"
+        if not manifest_path.exists():
+            raise FileNotFoundError(
+                f"No manifest.json in {run_dir}; pass a RunConfig so arms and contrast are known."
+            )
+        recorded = json.loads(manifest_path.read_text())
+        config = recorded.get("config") or {}
+        cfg = RunConfig(
+            model_id=recorded.get("model") or config.get("model_id", RunConfig.model_id),
+            provider=recorded.get("provider") or config.get("provider", "local"),
+            enable_thinking=recorded.get("enable_thinking", False),
+            mechanistic=recorded.get("mechanistic", False),
+            run_name=run_dir.name,
+            results_root=run_dir.parent,
+        )
+        if "arms" in recorded:
+            cfg.arms = tuple(recorded["arms"])
+        if "contrast" in recorded:
+            cfg.contrast = tuple(recorded["contrast"])
+    write_run_artifacts(run_dir, cfg, verbose=verbose, stopped_early=True)
+    return run_dir
+
+
+def run_all(cfg: RunConfig | None = None, *, verbose: bool = True) -> Path:
+    from . import plots, quality  # noqa: F401 -- kept so a notebook that imported via run_all still works
 
     cfg = cfg or RunConfig()
     scenarios = load_scenarios(cfg.data_file)
@@ -535,6 +844,7 @@ def run_all(cfg: RunConfig | None = None, *, verbose: bool = True) -> Path:
         scenarios = scenarios[: cfg.limit]
 
     timings: dict[str, float] = {}
+    run_dir = resolve_run_dir(cfg)
 
     def log(message: str) -> None:
         if verbose:
@@ -563,6 +873,11 @@ def run_all(cfg: RunConfig | None = None, *, verbose: bool = True) -> Path:
             "their 'note' field before reading the result."
         )
 
+    if cfg.finalize_only:
+        log(f"Finalize only -- no model load. Reading {run_dir / 'behavioural.csv'}")
+        write_run_artifacts(run_dir, cfg, stale=stale, verbose=verbose, stopped_early=True)
+        return run_dir
+
     options = dict(cfg.provider_options)
     if cfg.provider == "local":
         options.update(cfg.extra_load_kwargs)
@@ -571,17 +886,17 @@ def run_all(cfg: RunConfig | None = None, *, verbose: bool = True) -> Path:
         if cfg.dtype is not None:
             options.setdefault("dtype", cfg.dtype)
     log(f"Opening {cfg.provider} backend for {cfg.model_id} ...")
+    log(f"Results directory: {run_dir}")
+    backend = None
     backend = BackendSpec(
         kind=cfg.provider, model_id=cfg.model_id, options=options,
         max_gen_tokens=cfg.max_gen_tokens,
     ).build()
 
-    run_dir = cfg.results_root / datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    (run_dir / "plots").mkdir(parents=True, exist_ok=True)
-
     divergence = per_scenario = interventions = None
     candidates: list[int] = []
     logit_check: dict = {"checked": False, "reason": f"{cfg.provider} backend"}
+    stopped_early = False
 
     try:
         mechanistic = (
@@ -617,15 +932,38 @@ def run_all(cfg: RunConfig | None = None, *, verbose: bool = True) -> Path:
             log(f"Logit path check: {logit_check}")
 
         n_measurements = len(scenarios) * len(cfg.arms)
+        csv_path = run_dir / "behavioural.csv"
+        already = 0
+        if csv_path.exists():
+            already = len(pd.read_csv(csv_path))
+        start_hint = cfg.start_at or (already + 1)
         log(f"Experiment 1: behaviour over {len(scenarios)} scenarios x {len(cfg.arms)} arms "
             f"= {n_measurements} measurements ...")
-        with phase("behavioural"):
-            behavioural = run_behavioural(
-                backend, scenarios, cfg, Progress(n_measurements, log, every_seconds=cfg.progress_every_seconds) if verbose else None
+        progress = (
+            Progress(
+                n_measurements, log,
+                every_seconds=cfg.progress_every_seconds,
+                done=max(0, start_hint - 1),
             )
-        behavioural.to_csv(run_dir / "behavioural.csv", index=False)
+            if verbose else None
+        )
+        try:
+            with phase("behavioural"):
+                behavioural = run_behavioural(
+                    backend, scenarios, cfg, progress, run_dir=run_dir,
+                )
+        except KeyboardInterrupt:
+            stopped_early = True
+            log("Interrupted -- writing artifacts from rows already on disk.")
+            if csv_path.exists():
+                behavioural = pd.read_csv(csv_path)
+            else:
+                raise
+        else:
+            if _stop_requested(run_dir) or len(behavioural) < n_measurements:
+                stopped_early = True
 
-        if mechanistic:
+        if mechanistic and not stopped_early:
             low, high = cfg.contrast
             log(f"Experiment 2: capturing resid_post across {backend.handle.n_layers} layers "
                 f"for {low} vs {high} ...")
@@ -664,46 +1002,25 @@ def run_all(cfg: RunConfig | None = None, *, verbose: bool = True) -> Path:
                         for layer, act in layers.items()
                     },
                 )
+        elif mechanistic and stopped_early:
+            log("Skipping experiments 2-4 because the behavioural sweep did not finish.")
 
-        summary = analyse(behavioural, divergence, interventions, candidates, cfg)
-        (run_dir / "summary.json").write_text(json.dumps(summary, indent=2, default=float))
-
-        manifest = build_manifest(
-            cfg, backend,
-            {
-                "config": {k: str(v) if isinstance(v, Path) else v for k, v in asdict(cfg).items()},
-                "n_scenarios": len(scenarios),
-                "arms": list(cfg.arms),
-                "contrast": list(cfg.contrast),
-                "mechanistic": mechanistic,
-                "enable_thinking": cfg.enable_thinking,
-                "candidate_layers": candidates,
-                "logit_path_check": logit_check,
-                "timings_seconds": timings,
-                "stale_scenarios": [s.id for s in stale],
-                "cue_strings": {a: ARMS_BY_NAME[a].cue for a in cfg.arms},
-            },
+        write_run_artifacts(
+            run_dir, cfg,
+            backend=backend,
+            timings=timings,
+            stale=stale,
+            logit_check=logit_check,
+            mechanistic=mechanistic,
+            candidates=candidates,
+            verbose=verbose,
+            stopped_early=stopped_early,
         )
-        (run_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, default=float))
-
-        plots.write_all(behavioural, divergence, interventions, run_dir / "plots", cfg)
-
-        report = quality.run_checks(behavioural, divergence, interventions, summary, manifest)
-        (run_dir / "quality_report.json").write_text(json.dumps(report, indent=2))
-        log("")
-        log(quality.format_report(report))
-        log("")
-        if report["overall"] == "fail":
-            log(
-                "quality gate: FAIL -- at least one check failed outright. Read the report "
-                "above before drawing any conclusion from behavioural.csv, the plots, or "
-                "summary.json; the run completed, but its numbers are flagged as untrustworthy."
-            )
-
         log(f"Done. Results in {run_dir}")
         return run_dir
     finally:
-        backend.shutdown()
+        if backend is not None:
+            backend.shutdown()
 
 
 # --------------------------------------------------------------------------- sweep

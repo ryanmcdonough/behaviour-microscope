@@ -362,11 +362,26 @@ Every item below cost real time or produced a wrong number. They are not style n
 
 ### 5.1 interp-engine's sync facade refuses to run inside a running event loop
 Colab's kernel keeps one running for **every** cell, so `run_all(cfg)` raises `NestedEventLoop`.
-Hand it to a plain worker thread, which has no loop of its own:
+The same is true of `warmup()` inside `BackendSpec.build()` — the Thomson preflight cell hit
+this on a 70 GB load. Hand *any* engine call to a plain worker thread, which has no loop of its own:
 ```python
 with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
     run_dir = pool.submit(run_all, cfg).result()
 ```
+
+### 5.1b Thomson compatibility cell must not instantiate the MoE
+`AutoModelForCausalLM.from_config` under `torch.device("meta")`, then wrapping in `EagerModel`,
+still builds the full expert module tree. On Thomson-1 that fills Colab **host RAM**; 6b then
+tries to load 70 GB of weights with nowhere to put them. Check the architecture by importing
+the mapped class from the config — do not `from_config` a 35B MoE. The preflight cell is a
+second full load and historically did not release (`69.3 GB -> 69.3 GB`); it is off by default,
+and if you turn it on you must restart the runtime before 6b.
+
+### 5.1c Colab timeouts: checkpoint each measurement
+Thomson reasoning-on is hours. `behavioural.csv` is rewritten after every item, under a stable
+`run_name` on Drive. Resume with `START_AT=None` (continue after the last row) or an explicit
+1-based index matching `[N/210]`. Touch `STOP` in the run folder, or interrupt the kernel, to
+halt after the current item; 6c rebuilds plots from the CSV without loading the model.
 
 ### 5.2 A reasoning model's answer is not the first token
 Qwen3 and Thomson-1 leave the assistant turn open by default, so the first generated token is

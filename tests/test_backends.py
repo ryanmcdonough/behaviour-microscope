@@ -429,3 +429,109 @@ def test_capture_capable_backend_still_runs_the_mechanistic_half():
         can_capture = True
 
     assert LocalBackend(_H()).supports_mechanistic_now is True
+
+
+# --------------------------------------------------------------------------- concurrency
+
+
+class _Recorder:
+    """A backend that records call order and can be told whether it is safe to parallelise."""
+
+    name = "fake"; model_id = "fake"; supports_mechanistic = False
+
+    def __init__(self, concurrency_safe: bool, delay: float = 0.0):
+        self.concurrency_safe = concurrency_safe
+        self.delay = delay
+        self.in_flight = 0
+        self.max_in_flight = 0
+        self._lock = __import__("threading").Lock()
+
+    def measure(self, prompt):
+        import time
+        with self._lock:
+            self.in_flight += 1
+            self.max_in_flight = max(self.max_in_flight, self.in_flight)
+        time.sleep(self.delay)
+        with self._lock:
+            self.in_flight -= 1
+        return Measurement(chosen_letter="A", generated=prompt)
+
+    def describe(self): return {}
+    def shutdown(self): return None
+
+
+def test_results_come_back_in_prompt_order_not_completion_order():
+    """Rows must not depend on which prompt happened to finish first."""
+    from microscope.backends import measure_many
+    prompts = [f"p{i}" for i in range(24)]
+    out = measure_many(_Recorder(True, delay=0.002), prompts, max_workers=8)
+    assert [m.generated for m in out] == prompts
+
+
+def test_an_unsafe_backend_stays_sequential_however_many_workers_are_asked_for():
+    """A wrong True costs correctness; a wrong False costs only time."""
+    from microscope.backends import measure_many
+    rec = _Recorder(False, delay=0.002)
+    measure_many(rec, [f"p{i}" for i in range(12)], max_workers=8)
+    assert rec.max_in_flight == 1
+
+
+def test_a_safe_backend_actually_runs_prompts_together():
+    from microscope.backends import measure_many
+    rec = _Recorder(True, delay=0.01)
+    measure_many(rec, [f"p{i}" for i in range(12)], max_workers=4)
+    assert rec.max_in_flight > 1
+
+
+def test_default_is_sequential_so_existing_runs_are_unchanged():
+    from microscope.backends import measure_many
+    rec = _Recorder(True, delay=0.002)
+    measure_many(rec, [f"p{i}" for i in range(8)])
+    assert rec.max_in_flight == 1
+
+
+def test_progress_callback_reports_the_item_that_finished():
+    from microscope.backends import measure_many
+    seen = []
+    lock = __import__("threading").Lock()
+
+    def on_result(index, m):
+        with lock:
+            seen.append((index, m.generated))
+
+    prompts = [f"p{i}" for i in range(16)]
+    measure_many(_Recorder(True, delay=0.002), prompts, max_workers=4, on_result=on_result)
+    assert len(seen) == 16
+    assert all(prompts[i] == text for i, text in seen)
+
+
+def test_a_worker_exception_surfaces_rather_than_being_swallowed():
+    from microscope.backends import measure_many
+
+    class _Boom(_Recorder):
+        def measure(self, prompt):
+            if prompt == "p3":
+                raise RuntimeError("provider refused")
+            return super().measure(prompt)
+
+    import pytest
+    with pytest.raises(RuntimeError, match="provider refused"):
+        measure_many(_Boom(True), [f"p{i}" for i in range(8)], max_workers=4)
+
+
+def test_local_backend_is_concurrency_safe_only_on_the_vllm_generate_path():
+    from microscope.backends import LocalBackend
+
+    class _H:
+        model_id = "x"; backend = "VLLMModel"; n_layers = 4; d_model = 8
+        enable_thinking = True
+        template_controls = frozenset({"enable_thinking"})
+        has_reasoning_mode = True
+        can_capture = False
+
+    class _Eager(_H):
+        backend = "EagerModel"
+        can_capture = True
+
+    assert LocalBackend(_H()).concurrency_safe is True        # vLLM, generate, no capture
+    assert LocalBackend(_Eager()).concurrency_safe is False   # eager serialises anyway

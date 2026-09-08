@@ -21,6 +21,7 @@ own vendor intends, and a translation layer would put its own behaviour into the
 
 from __future__ import annotations
 
+import concurrent.futures
 import os
 import re
 from dataclasses import dataclass, field
@@ -104,10 +105,65 @@ class Backend(Protocol):
     name: str
     model_id: str
     supports_mechanistic: bool
+    # Whether several `measure` calls may be in flight at once. False is the safe answer and
+    # the default: it costs only time, where a wrong True costs correctness.
+    concurrency_safe: bool
 
     def measure(self, prompt: str) -> Measurement: ...
     def describe(self) -> dict: ...
     def shutdown(self) -> None: ...
+
+
+def measure_many(
+    backend: "Backend",
+    prompts: list[str],
+    *,
+    max_workers: int = 1,
+    on_result=None,
+) -> list[Measurement]:
+    """Measure a list of prompts, optionally with several in flight at once.
+
+    Sequential by default, and sequential regardless on a backend that has not declared itself
+    concurrency-safe. Results come back in prompt order whichever path runs, so a run's rows do
+    not depend on how fast each prompt happened to finish.
+
+    Concurrency buys different things on different backends, and nothing at all on some:
+
+    - API backends are network-bound, and 210 sequential HTTPS round-trips is mostly latency.
+      Both official SDKs are thread-safe, so this is a straightforward win.
+    - The local vLLM generate path submits onto one shared event loop (interp-engine's
+      ``LoopRunner``), which is the condition under which vLLM's continuous batching engages.
+    - The local eager path serialises on the GPU no matter what, and its capture machinery is
+      not built for concurrent forwards, so it stays sequential.
+
+    ``on_result(index, measurement)`` is called once per completed measurement, for progress
+    reporting. It is called from the worker thread and must be cheap and thread-safe; the index
+    is the prompt's position, so a caller can label progress with the item that actually
+    finished rather than assuming completion order.
+    """
+    if max_workers <= 1 or len(prompts) <= 1 or not getattr(backend, "concurrency_safe", False):
+        out = []
+        for index, prompt in enumerate(prompts):
+            m = backend.measure(prompt)
+            if on_result:
+                on_result(index, m)
+            out.append(m)
+        return out
+
+    results: list[Measurement | None] = [None] * len(prompts)
+
+    def one(index: int) -> None:
+        m = backend.measure(prompts[index])
+        results[index] = m
+        if on_result:
+            on_result(index, m)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
+        # Consumed rather than left to garbage collection: an exception in a worker is raised
+        # here, at the call site that can attribute it to a prompt, instead of vanishing.
+        for future in [pool.submit(one, i) for i in range(len(prompts))]:
+            future.result()
+    return [m for m in results if m is not None]
 
 
 def _parse_letter(text: str) -> tuple[str | None, bool]:
@@ -145,6 +201,16 @@ class LocalBackend:
     """
 
     supports_mechanistic = True
+
+    @property
+    def concurrency_safe(self) -> bool:
+        """Only the vLLM generate path benefits, and only that path is safe to drive this way.
+
+        Eager generation serialises on the GPU whatever the caller does, and the logits path
+        shares capture machinery that is not built for concurrent forwards -- so a True here
+        would buy nothing and risk a great deal.
+        """
+        return self.response_mode == "generate" and not self.handle.can_capture
 
     def __init__(self, handle: interp.ModelHandle, max_gen_tokens: int = 24,
                  response_mode: str | None = None, record_tokens: int = 8):
@@ -251,6 +317,10 @@ class OpenAIBackend:
     """
 
     supports_mechanistic = False
+
+    # Network-bound, and the official SDK is thread-safe: the sequential loop is
+    # almost entirely round-trip latency.
+    concurrency_safe = True
 
     def __init__(self, model_id: str, *, max_tokens: int = 256, reasoning_effort: str | None = None):
         try:
@@ -367,6 +437,10 @@ class AnthropicBackend:
     """
 
     supports_mechanistic = False
+
+    # Network-bound, and the official SDK is thread-safe: the sequential loop is
+    # almost entirely round-trip latency.
+    concurrency_safe = True
 
     def __init__(
         self,
