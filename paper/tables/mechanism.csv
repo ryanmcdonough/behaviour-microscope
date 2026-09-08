@@ -1,0 +1,4 @@
+configuration,n_layers,peak_relative_l2,candidate_layers,patch_forward_from,patch_forward_to,patch_forward_peak_layer,patch_forward_onset_layer,patch_reverse_from,patch_reverse_to,patch_reverse_peak_layer,patch_reverse_onset_layer,zero_control_max,random_control_mean,random_control_max
+gemma-3-12b-it @bb18eda,48,0.3137,"47, 45, 44, 43",0.5177,0.0,47,25,0.0,0.5177,47,26,0.0,0.03973156889075582,0.6033208908366889
+Qwen3-14B @0915afb,40,0.2836,"39, 29, 31, 30",0.3808,0.0244,39,24,0.0244,0.3808,39,26,0.0,0.010484061393642,0.2413551865955687
+Thomson-1.0-Small @bb18eda,40,0.2259,"27, 29, 30, 31",0.0011,0.0002,39,0,0.0002,0.0011,39,25,0.0,0.0001468125880136244,0.002716383483089101

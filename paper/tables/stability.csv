@@ -1,0 +1,5 @@
+configuration,n_runs,n_items,n_unstable,where
+gpt-5.1 @bb18eda,3,210,7,"court:3, partner_confirmed:3, partner_said:1"
+gpt-5.6-sol @bb18eda,3,210,1,court:1
+claude-opus-5 effort=low @bb18eda,3,210,0,none
+claude-opus-5 effort=medium @bb18eda,3,210,0,none

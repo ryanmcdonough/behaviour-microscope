@@ -1,0 +1,18 @@
+configuration,directory,model,provider,reasoning,effort,quality,commit,interp_engine,mechanistic,timestamp_utc,n_measurements
+gemma-3-12b-it @bb18eda,20260908T145806Z,google/gemma-3-12b-it,local,False,,pass,bb18eda,1.6.0,True,2026-09-08T15:08:22.419005+00:00,210
+Qwen3-14B @0915afb,20260904T111942Z,Qwen/Qwen3-14B,local,False,,pass,0915afb,1.5.1,True,2026-09-04T11:23:40.966535+00:00,210
+Qwen3-14B think @f8e14eb,20260904T080923Z,Qwen/Qwen3-14B,local,True,,warn,f8e14eb,1.5.1,False,2026-09-04T10:47:26.652811+00:00,210
+Thomson-1.0-Small @bb18eda,thomson-1-plain,thomsonreuters/Thomson-1.0-Small,local,False,,pass,bb18eda,1.6.0,True,2026-09-08T19:29:44.425846+00:00,210
+Thomson-1.0-Small think @bb18eda,thomson-1-thinking,thomsonreuters/Thomson-1.0-Small,local,True,,warn,bb18eda,1.6.0,False,2026-09-08T17:23:36.177220+00:00,210
+gpt-5.1 @bb18eda,20260908T130754Z,gpt-5.1,openai,False,,pass,bb18eda,1.5.1,False,2026-09-08T13:11:00.343084+00:00,210
+gpt-5.1 @bb18eda,20260908T132537Z,gpt-5.1,openai,False,,pass,bb18eda,1.5.1,False,2026-09-08T13:29:10.755527+00:00,210
+gpt-5.1 @bb18eda,20260908T134416Z,gpt-5.1,openai,False,,pass,bb18eda,1.5.1,False,2026-09-08T13:47:36.772714+00:00,210
+gpt-5.6-sol @bb18eda,20260908T121324Z,gpt-5.6-sol,openai,False,,pass,bb18eda,1.5.1,False,2026-09-08T12:18:27.001352+00:00,210
+gpt-5.6-sol @bb18eda,20260908T122852Z,gpt-5.6-sol,openai,False,,pass,bb18eda,1.5.1,False,2026-09-08T12:34:30.939296+00:00,210
+gpt-5.6-sol @bb18eda,20260908T124451Z,gpt-5.6-sol,openai,False,,pass,bb18eda,1.5.1,False,2026-09-08T12:50:38.290857+00:00,210
+claude-opus-5 effort=low @bb18eda,20260908T121827Z,claude-opus-5,anthropic,False,low,pass,bb18eda,1.5.1,False,2026-09-08T12:28:52.317213+00:00,210
+claude-opus-5 effort=low @bb18eda,20260908T123431Z,claude-opus-5,anthropic,False,low,pass,bb18eda,1.5.1,False,2026-09-08T12:44:51.507782+00:00,210
+claude-opus-5 effort=low @bb18eda,20260908T125038Z,claude-opus-5,anthropic,False,low,pass,bb18eda,1.5.1,False,2026-09-08T13:01:06.442524+00:00,210
+claude-opus-5 effort=medium @bb18eda,20260908T131100Z,claude-opus-5,anthropic,False,medium,pass,bb18eda,1.5.1,False,2026-09-08T13:25:37.131515+00:00,210
+claude-opus-5 effort=medium @bb18eda,20260908T132911Z,claude-opus-5,anthropic,False,medium,pass,bb18eda,1.5.1,False,2026-09-08T13:44:15.782474+00:00,210
+claude-opus-5 effort=medium @bb18eda,20260908T134737Z,claude-opus-5,anthropic,False,medium,pass,bb18eda,1.5.1,False,2026-09-08T14:02:30.305247+00:00,210

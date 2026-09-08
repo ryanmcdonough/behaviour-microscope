@@ -265,6 +265,11 @@ def _measurement_row(scenario: Scenario, condition: str, prompt: str, m: Measure
         "letter_mass": m.letter_mass,
         "parse_ok": m.parse_ok,
         "probability_source": m.probability_source,
+        # Whether the model went beyond the single letter it was asked for. Stored per row so
+        # the measure is auditable against `generated_answer` rather than recomputed from a
+        # rule that may have changed since the run. Secondary and exploratory -- see
+        # `metrics.elaboration_by_arm` for what it may and may not be read as.
+        "elaborated": metrics.is_elaborated(m.generated, m.chosen_letter),
         "generated_answer": m.generated,
         "prompt": prompt,
     }
@@ -657,6 +662,14 @@ def analyse(
     }
     summary["factorial"] = metrics.factorial_effects(cells)
     summary["factorial"]["measure"] = "p_false_normalised" if len(p_false) >= 4 else "accepted_false_proposition"
+
+    # Format compliance, kept in its own top-level key so it can never be mistaken for FPAR.
+    # It is the only sub-threshold signal available on a backend that exposes no logprobs: a
+    # model can be flat at 0.0 acceptance and still register the authority gradient in whether
+    # it justifies itself.
+    summary["elaboration"] = metrics.elaboration_by_arm(
+        behavioural, PLANNED_CONTRASTS, reasoning_expected=cfg.enable_thinking
+    )
 
     if divergence is not None:
         summary["representational"] = {

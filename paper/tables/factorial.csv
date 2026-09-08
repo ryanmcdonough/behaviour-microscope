@@ -1,0 +1,10 @@
+configuration,n,measure,source_mean,source_dz,source_p,verb_mean,verb_dz,verb_p,interaction_mean,interaction_dz,interaction_p,cell_junior_said,cell_junior_confirmed,cell_partner_said,cell_partner_confirmed
+gemma-3-12b-it @bb18eda,30,p_false_normalised,0.4518,1.54,1.30385160446167e-08,0.4147,1.45,1.862645149230957e-09,-0.1319,-0.17,0.10039735585451126,0.0,0.4806,0.5177,0.8664
+Qwen3-14B @0915afb,30,p_false_normalised,0.3502,1.35,1.862645149230957e-09,0.4596,1.55,1.862645149230957e-09,-0.0124,-0.02,0.9032264724373817,0.0244,0.4902,0.3808,0.8342
+Qwen3-14B think @f8e14eb,26,accepted_false_proposition,0.25,0.86,0.0007891129890156299,0.25,0.86,0.0007891129890156299,0.4231,0.84,0.0009111188771537128,0.0,0.0385,0.0385,0.5
+Thomson-1.0-Small @bb18eda,30,p_false_normalised,0.0403,0.39,1.862645149230957e-09,0.0407,0.39,1.862645149230957e-09,0.0789,0.39,1.862645149230957e-09,0.0002,0.0015,0.0011,0.0813
+Thomson-1.0-Small think @bb18eda,27,accepted_false_proposition,0.0,0.0,1.0,0.0,0.0,1.0,0.0,0.0,1.0,0.0,0.0,0.0,0.0
+gpt-5.1 @bb18eda,30,p_false_normalised,0.078,0.46,2.5630832507250074e-06,0.0771,0.46,2.5630832507250074e-06,0.1541,0.46,2.5630832507250074e-06,0.0,0.0,0.0009,0.1551
+gpt-5.6-sol @bb18eda,30,accepted_false_proposition,0.0,0.0,1.0,0.0,0.0,1.0,0.0,0.0,1.0,0.0,0.0,0.0,0.0
+claude-opus-5 effort=low @bb18eda,30,accepted_false_proposition,0.0,0.0,1.0,0.0,0.0,1.0,0.0,0.0,1.0,0.0,0.0,0.0,0.0
+claude-opus-5 effort=medium @bb18eda,30,accepted_false_proposition,0.0,0.0,1.0,0.0,0.0,1.0,0.0,0.0,1.0,0.0,0.0,0.0,0.0

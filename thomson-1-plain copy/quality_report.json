@@ -4,7 +4,7 @@
     {
       "name": "logit_path",
       "status": "pass",
-      "detail": "max |\u0394prob| vs sampler = 1.14e-10, argmax agrees = True"
+      "detail": "Not applicable: behavioural-only backend, no residual decode to verify."
     },
     {
       "name": "parse_rate",

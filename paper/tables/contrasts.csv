@@ -1,0 +1,92 @@
+configuration,measure,arm_a,arm_b,isolates,n,rate_a,rate_b,difference,p_value,p_holm,significant_holm_05
+gemma-3-12b-it @bb18eda,binary (FPAR),junior_said,partner_said,source (verb held at 'said'),30,0.0,0.5,0.5,6.103515625e-05,0.00042724609375,True
+gemma-3-12b-it @bb18eda,binary (FPAR),junior_confirmed,partner_confirmed,source (verb held at 'confirmed'),30,0.4666666666666667,0.8666666666666667,0.4,0.00048828125,0.00244140625,True
+gemma-3-12b-it @bb18eda,binary (FPAR),junior_said,junior_confirmed,verb (source held at 'junior'),30,0.0,0.4666666666666667,0.4666666666666667,0.0001220703125,0.000732421875,True
+gemma-3-12b-it @bb18eda,binary (FPAR),partner_said,partner_confirmed,verb (source held at 'partner'),30,0.5,0.8666666666666667,0.3666666666666667,0.0009765625,0.00390625,True
+gemma-3-12b-it @bb18eda,binary (FPAR),floor,junior_said,"any assertion at all, vs none",30,0.03333333333333333,0.0,-0.03333333333333333,1.0,1.0,False
+gemma-3-12b-it @bb18eda,binary (FPAR),partner_confirmed,court,organisational vs legal authority,30,0.8666666666666667,0.8666666666666667,0.0,1.0,1.0,False
+gemma-3-12b-it @bb18eda,binary (FPAR),junior_said,adverse,discounting an adverse source,30,0.0,0.03333333333333333,0.03333333333333333,1.0,1.0,False
+gemma-3-12b-it @bb18eda,continuous (p_false_normalised),junior_said,partner_said,source (verb held at 'said'),30,8.302749132207539e-07,0.5177061974907012,0.5177053672157881,1.862645149230957e-09,1.30385160446167e-08,True
+gemma-3-12b-it @bb18eda,continuous (p_false_normalised),junior_confirmed,partner_confirmed,source (verb held at 'confirmed'),30,0.4806112370230187,0.8664322686712758,0.38582103164825715,3.1478703022003174e-07,1.259148120880127e-06,True
+gemma-3-12b-it @bb18eda,continuous (p_false_normalised),junior_said,junior_confirmed,verb (source held at 'junior'),30,8.302749132207539e-07,0.4806112370230187,0.4806104067481056,1.862645149230957e-09,1.30385160446167e-08,True
+gemma-3-12b-it @bb18eda,continuous (p_false_normalised),partner_said,partner_confirmed,verb (source held at 'partner'),30,0.5177061974907012,0.8664322686712758,0.34872607118057475,1.862645149230957e-09,1.30385160446167e-08,True
+gemma-3-12b-it @bb18eda,continuous (p_false_normalised),floor,junior_said,"any assertion at all, vs none",30,0.03328650139484458,8.302749132207539e-07,-0.033285671119931345,0.1631073882292975,0.326214776458595,False
+gemma-3-12b-it @bb18eda,continuous (p_false_normalised),partner_confirmed,court,organisational vs legal authority,30,0.8664322686712758,0.8664070156833276,-2.525298794809116e-05,0.7000329215079546,0.7000329215079546,False
+gemma-3-12b-it @bb18eda,continuous (p_false_normalised),junior_said,adverse,discounting an adverse source,30,8.302749132207539e-07,0.03334399725008911,0.03334316697517589,0.10230949143544252,0.3069284743063275,False
+Qwen3-14B @0915afb,binary (FPAR),junior_said,partner_said,source (verb held at 'said'),30,0.03333333333333333,0.4,0.3666666666666667,0.0009765625,0.0048828125,True
+Qwen3-14B @0915afb,binary (FPAR),junior_confirmed,partner_confirmed,source (verb held at 'confirmed'),30,0.5,0.8333333333333334,0.33333333333333337,0.001953125,0.0078125,True
+Qwen3-14B @0915afb,binary (FPAR),junior_said,junior_confirmed,verb (source held at 'junior'),30,0.03333333333333333,0.5,0.4666666666666667,0.0001220703125,0.0008544921875,True
+Qwen3-14B @0915afb,binary (FPAR),partner_said,partner_confirmed,verb (source held at 'partner'),30,0.4,0.8333333333333334,0.43333333333333335,0.000244140625,0.00146484375,True
+Qwen3-14B @0915afb,binary (FPAR),floor,junior_said,"any assertion at all, vs none",30,0.0,0.03333333333333333,0.03333333333333333,1.0,1.0,False
+Qwen3-14B @0915afb,binary (FPAR),partner_confirmed,court,organisational vs legal authority,30,0.8333333333333334,0.8666666666666667,0.033333333333333326,1.0,1.0,False
+Qwen3-14B @0915afb,binary (FPAR),junior_said,adverse,discounting an adverse source,30,0.03333333333333333,0.0,-0.03333333333333333,1.0,1.0,False
+Qwen3-14B @0915afb,continuous (p_false_normalised),junior_said,partner_said,source (verb held at 'said'),30,0.02437006994814815,0.380797877258637,0.35642780731048895,1.862645149230957e-09,1.30385160446167e-08,True
+Qwen3-14B @0915afb,continuous (p_false_normalised),junior_confirmed,partner_confirmed,source (verb held at 'confirmed'),30,0.49019579069085545,0.8342486227125502,0.3440528320216946,1.862645149230957e-09,1.30385160446167e-08,True
+Qwen3-14B @0915afb,continuous (p_false_normalised),junior_said,junior_confirmed,verb (source held at 'junior'),30,0.02437006994814815,0.49019579069085545,0.4658257207427073,1.862645149230957e-09,1.30385160446167e-08,True
+Qwen3-14B @0915afb,continuous (p_false_normalised),partner_said,partner_confirmed,verb (source held at 'partner'),30,0.380797877258637,0.8342486227125502,0.453450745453913,1.862645149230957e-09,1.30385160446167e-08,True
+Qwen3-14B @0915afb,continuous (p_false_normalised),floor,junior_said,"any assertion at all, vs none",30,2.7666165799879077e-06,0.02437006994814815,0.024367303331568158,3.049522638320923e-05,9.148567914962769e-05,True
+Qwen3-14B @0915afb,continuous (p_false_normalised),partner_confirmed,court,organisational vs legal authority,30,0.8342486227125502,0.847576552467689,0.013327929755138959,0.9099283966830625,0.9099283966830625,False
+Qwen3-14B @0915afb,continuous (p_false_normalised),junior_said,adverse,discounting an adverse source,30,0.02437006994814815,0.01460306956773108,-0.009767000380417067,0.27438136433460003,0.5487627286692001,False
+Qwen3-14B think @f8e14eb,binary (FPAR),junior_said,partner_said,source (verb held at 'said'),30,0.0,0.03333333333333333,0.03333333333333333,1.0,1.0,False
+Qwen3-14B think @f8e14eb,binary (FPAR),junior_confirmed,partner_confirmed,source (verb held at 'confirmed'),26,0.038461538461538464,0.5,0.46153846153846156,0.00048828125,0.0029296875,True
+Qwen3-14B think @f8e14eb,binary (FPAR),junior_said,junior_confirmed,verb (source held at 'junior'),28,0.0,0.07142857142857142,0.07142857142857142,0.5,1.0,False
+Qwen3-14B think @f8e14eb,binary (FPAR),partner_said,partner_confirmed,verb (source held at 'partner'),28,0.03571428571428571,0.5,0.4642857142857143,0.000244140625,0.001708984375,True
+Qwen3-14B think @f8e14eb,binary (FPAR),floor,junior_said,"any assertion at all, vs none",30,0.06666666666666667,0.0,-0.06666666666666667,0.5,1.0,False
+Qwen3-14B think @f8e14eb,binary (FPAR),partner_confirmed,court,organisational vs legal authority,26,0.5384615384615384,0.7692307692307693,0.23076923076923084,0.0703125,0.3515625,False
+Qwen3-14B think @f8e14eb,binary (FPAR),junior_said,adverse,discounting an adverse source,30,0.0,0.0,0.0,1.0,1.0,False
+Thomson-1.0-Small @bb18eda,binary (FPAR),junior_said,partner_said,source (verb held at 'said'),30,0.0,0.0,0.0,1.0,1.0,False
+Thomson-1.0-Small @bb18eda,binary (FPAR),junior_confirmed,partner_confirmed,source (verb held at 'confirmed'),30,0.0,0.06666666666666667,0.06666666666666667,0.5,1.0,False
+Thomson-1.0-Small @bb18eda,binary (FPAR),junior_said,junior_confirmed,verb (source held at 'junior'),30,0.0,0.0,0.0,1.0,1.0,False
+Thomson-1.0-Small @bb18eda,binary (FPAR),partner_said,partner_confirmed,verb (source held at 'partner'),30,0.0,0.06666666666666667,0.06666666666666667,0.5,1.0,False
+Thomson-1.0-Small @bb18eda,binary (FPAR),floor,junior_said,"any assertion at all, vs none",30,0.0,0.0,0.0,1.0,1.0,False
+Thomson-1.0-Small @bb18eda,binary (FPAR),partner_confirmed,court,organisational vs legal authority,30,0.06666666666666667,0.26666666666666666,0.2,0.03125,0.21875,False
+Thomson-1.0-Small @bb18eda,binary (FPAR),junior_said,adverse,discounting an adverse source,30,0.0,0.0,0.0,1.0,1.0,False
+Thomson-1.0-Small @bb18eda,continuous (p_false_normalised),junior_said,partner_said,source (verb held at 'said'),30,0.00020174095292192234,0.001067297431159454,0.0008655564782375317,9.98377799987793e-07,2.995133399963379e-06,True
+Thomson-1.0-Small @bb18eda,continuous (p_false_normalised),junior_confirmed,partner_confirmed,source (verb held at 'confirmed'),30,0.0014766826181987823,0.08129130937375958,0.07981462675556081,1.862645149230957e-09,1.30385160446167e-08,True
+Thomson-1.0-Small @bb18eda,continuous (p_false_normalised),junior_said,junior_confirmed,verb (source held at 'junior'),30,0.00020174095292192234,0.0014766826181987823,0.00127494166527686,1.30385160446167e-07,5.21540641784668e-07,True
+Thomson-1.0-Small @bb18eda,continuous (p_false_normalised),partner_said,partner_confirmed,verb (source held at 'partner'),30,0.001067297431159454,0.08129130937375958,0.08022401194260012,1.862645149230957e-09,1.30385160446167e-08,True
+Thomson-1.0-Small @bb18eda,continuous (p_false_normalised),floor,junior_said,"any assertion at all, vs none",30,0.00011976770052757304,0.00020174095292192234,8.197325239434929e-05,0.00011058151721954346,0.00022116303443908691,True
+Thomson-1.0-Small @bb18eda,continuous (p_false_normalised),partner_confirmed,court,organisational vs legal authority,30,0.08129130937375958,0.2867008561710239,0.2054095467972644,1.862645149230957e-09,1.30385160446167e-08,True
+Thomson-1.0-Small @bb18eda,continuous (p_false_normalised),junior_said,adverse,discounting an adverse source,30,0.00020174095292192234,0.00020617489763250467,4.433944710582397e-06,0.049710121005773544,0.049710121005773544,True
+Thomson-1.0-Small think @bb18eda,binary (FPAR),junior_said,partner_said,source (verb held at 'said'),30,0.0,0.03333333333333333,0.03333333333333333,1.0,1.0,False
+Thomson-1.0-Small think @bb18eda,binary (FPAR),junior_confirmed,partner_confirmed,source (verb held at 'confirmed'),27,0.0,0.0,0.0,1.0,1.0,False
+Thomson-1.0-Small think @bb18eda,binary (FPAR),junior_said,junior_confirmed,verb (source held at 'junior'),29,0.0,0.0,0.0,1.0,1.0,False
+Thomson-1.0-Small think @bb18eda,binary (FPAR),partner_said,partner_confirmed,verb (source held at 'partner'),27,0.0,0.0,0.0,1.0,1.0,False
+Thomson-1.0-Small think @bb18eda,binary (FPAR),floor,junior_said,"any assertion at all, vs none",30,0.0,0.0,0.0,1.0,1.0,False
+Thomson-1.0-Small think @bb18eda,binary (FPAR),partner_confirmed,court,organisational vs legal authority,24,0.0,0.20833333333333334,0.20833333333333334,0.0625,0.4375,False
+Thomson-1.0-Small think @bb18eda,binary (FPAR),junior_said,adverse,discounting an adverse source,30,0.0,0.0,0.0,1.0,1.0,False
+gpt-5.1 @bb18eda,binary (FPAR),junior_said,partner_said,source (verb held at 'said'),30,0.0,0.0,0.0,1.0,1.0,False
+gpt-5.1 @bb18eda,binary (FPAR),junior_confirmed,partner_confirmed,source (verb held at 'confirmed'),30,0.0,0.13333333333333333,0.13333333333333333,0.125,0.875,False
+gpt-5.1 @bb18eda,binary (FPAR),junior_said,junior_confirmed,verb (source held at 'junior'),30,0.0,0.0,0.0,1.0,1.0,False
+gpt-5.1 @bb18eda,binary (FPAR),partner_said,partner_confirmed,verb (source held at 'partner'),30,0.0,0.13333333333333333,0.13333333333333333,0.125,0.875,False
+gpt-5.1 @bb18eda,binary (FPAR),floor,junior_said,"any assertion at all, vs none",30,0.0,0.0,0.0,1.0,1.0,False
+gpt-5.1 @bb18eda,binary (FPAR),partner_confirmed,court,organisational vs legal authority,30,0.13333333333333333,0.2,0.06666666666666668,0.625,1.0,False
+gpt-5.1 @bb18eda,binary (FPAR),junior_said,adverse,discounting an adverse source,30,0.0,0.0,0.0,1.0,1.0,False
+gpt-5.1 @bb18eda,continuous (p_false_normalised),junior_said,partner_said,source (verb held at 'said'),30,9.668242632282338e-10,0.0009056413781294282,0.0009056404113051649,0.003510363671504141,0.017551818357520704,True
+gpt-5.1 @bb18eda,continuous (p_false_normalised),junior_confirmed,partner_confirmed,source (verb held at 'confirmed'),30,8.052274071325493e-06,0.15505089573050487,0.1550428434564335,2.5630832507250074e-06,1.794158275507505e-05,True
+gpt-5.1 @bb18eda,continuous (p_false_normalised),junior_said,junior_confirmed,verb (source held at 'junior'),30,9.668242632282338e-10,8.052274071325493e-06,8.051307247062265e-06,0.21322298815094953,0.6396689644528486,False
+gpt-5.1 @bb18eda,continuous (p_false_normalised),partner_said,partner_confirmed,verb (source held at 'partner'),30,0.0009056413781294282,0.15505089573050487,0.15414525435237542,2.5630832507250074e-06,1.794158275507505e-05,True
+gpt-5.1 @bb18eda,continuous (p_false_normalised),floor,junior_said,"any assertion at all, vs none",30,7.450623668520706e-09,9.668242632282338e-10,-6.483799405292472e-09,0.030327342511675306,0.12130937004670123,False
+gpt-5.1 @bb18eda,continuous (p_false_normalised),partner_confirmed,court,organisational vs legal authority,30,0.15505089573050487,0.20391066778650083,0.04885977205599599,0.4161298982799053,0.6396689644528486,False
+gpt-5.1 @bb18eda,continuous (p_false_normalised),junior_said,adverse,discounting an adverse source,30,9.668242632282338e-10,1.6444867198246593e-09,6.776624565964255e-10,0.24112136827741837,0.6396689644528486,False
+gpt-5.6-sol @bb18eda,binary (FPAR),junior_said,partner_said,source (verb held at 'said'),30,0.0,0.0,0.0,1.0,1.0,False
+gpt-5.6-sol @bb18eda,binary (FPAR),junior_confirmed,partner_confirmed,source (verb held at 'confirmed'),30,0.0,0.0,0.0,1.0,1.0,False
+gpt-5.6-sol @bb18eda,binary (FPAR),junior_said,junior_confirmed,verb (source held at 'junior'),30,0.0,0.0,0.0,1.0,1.0,False
+gpt-5.6-sol @bb18eda,binary (FPAR),partner_said,partner_confirmed,verb (source held at 'partner'),30,0.0,0.0,0.0,1.0,1.0,False
+gpt-5.6-sol @bb18eda,binary (FPAR),floor,junior_said,"any assertion at all, vs none",30,0.0,0.0,0.0,1.0,1.0,False
+gpt-5.6-sol @bb18eda,binary (FPAR),partner_confirmed,court,organisational vs legal authority,30,0.0,0.0,0.0,1.0,1.0,False
+gpt-5.6-sol @bb18eda,binary (FPAR),junior_said,adverse,discounting an adverse source,30,0.0,0.0,0.0,1.0,1.0,False
+claude-opus-5 effort=low @bb18eda,binary (FPAR),junior_said,partner_said,source (verb held at 'said'),30,0.0,0.0,0.0,1.0,1.0,False
+claude-opus-5 effort=low @bb18eda,binary (FPAR),junior_confirmed,partner_confirmed,source (verb held at 'confirmed'),30,0.0,0.0,0.0,1.0,1.0,False
+claude-opus-5 effort=low @bb18eda,binary (FPAR),junior_said,junior_confirmed,verb (source held at 'junior'),30,0.0,0.0,0.0,1.0,1.0,False
+claude-opus-5 effort=low @bb18eda,binary (FPAR),partner_said,partner_confirmed,verb (source held at 'partner'),30,0.0,0.0,0.0,1.0,1.0,False
+claude-opus-5 effort=low @bb18eda,binary (FPAR),floor,junior_said,"any assertion at all, vs none",30,0.0,0.0,0.0,1.0,1.0,False
+claude-opus-5 effort=low @bb18eda,binary (FPAR),partner_confirmed,court,organisational vs legal authority,30,0.0,0.0,0.0,1.0,1.0,False
+claude-opus-5 effort=low @bb18eda,binary (FPAR),junior_said,adverse,discounting an adverse source,30,0.0,0.0,0.0,1.0,1.0,False
+claude-opus-5 effort=medium @bb18eda,binary (FPAR),junior_said,partner_said,source (verb held at 'said'),30,0.0,0.0,0.0,1.0,1.0,False
+claude-opus-5 effort=medium @bb18eda,binary (FPAR),junior_confirmed,partner_confirmed,source (verb held at 'confirmed'),30,0.0,0.0,0.0,1.0,1.0,False
+claude-opus-5 effort=medium @bb18eda,binary (FPAR),junior_said,junior_confirmed,verb (source held at 'junior'),30,0.0,0.0,0.0,1.0,1.0,False
+claude-opus-5 effort=medium @bb18eda,binary (FPAR),partner_said,partner_confirmed,verb (source held at 'partner'),30,0.0,0.0,0.0,1.0,1.0,False
+claude-opus-5 effort=medium @bb18eda,binary (FPAR),floor,junior_said,"any assertion at all, vs none",30,0.0,0.0,0.0,1.0,1.0,False
+claude-opus-5 effort=medium @bb18eda,binary (FPAR),partner_confirmed,court,organisational vs legal authority,30,0.0,0.0,0.0,1.0,1.0,False
+claude-opus-5 effort=medium @bb18eda,binary (FPAR),junior_said,adverse,discounting an adverse source,30,0.0,0.0,0.0,1.0,1.0,False

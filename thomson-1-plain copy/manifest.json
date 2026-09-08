@@ -1,7 +1,7 @@
 {
   "experiment_version": "authority_v1",
-  "timestamp_utc": "2026-09-04T07:52:59.922854+00:00",
-  "git_commit": "c1417c9f2f23be984e99519aebbde229b911c8d7",
+  "timestamp_utc": "2026-09-08T19:29:44.425846+00:00",
+  "git_commit": "bb18eda9db92dededb41af5c8842382036d5a3d3",
   "model": "thomsonreuters/Thomson-1.0-Small",
   "model_revision": "6f58dd819061240192285228e8c0ffcffd0fc665",
   "provider": "local",
@@ -12,6 +12,8 @@
     "n_layers": 40,
     "d_model": 2048,
     "response_mode": "logits",
+    "max_gen_tokens": 24,
+    "record_tokens": 8,
     "enable_thinking": false,
     "has_reasoning_mode": true,
     "template_controls": [
@@ -25,10 +27,12 @@
   "generation": {
     "temperature": 0.0,
     "max_tokens": 24,
+    "max_tokens_requested": 24,
     "greedy": true
   },
+  "max_concurrency": 1,
   "versions": {
-    "interp_engine": "1.5.1",
+    "interp_engine": "1.6.0",
     "openai": "2.54.0",
     "anthropic": null,
     "transformers": "5.16.1",
@@ -52,7 +56,7 @@
     "seed": 20260902,
     "limit": null,
     "data_file": "/content/behaviour-microscope/data/authority_v1.jsonl",
-    "results_root": "/content/behaviour-microscope/results",
+    "results_root": "/content/drive/MyDrive/behaviour-microscope/results/plain",
     "save_activations": false,
     "extra_load_kwargs": {
       "device": "cuda"
@@ -74,7 +78,11 @@
     ],
     "progress_every_seconds": 15.0,
     "mechanistic": true,
-    "enable_thinking": false
+    "max_concurrency": 1,
+    "enable_thinking": false,
+    "run_name": "thomson-1-plain",
+    "start_at": null,
+    "finalize_only": false
   },
   "n_scenarios": 30,
   "arms": [
@@ -90,7 +98,7 @@
     "junior_said",
     "partner_said"
   ],
-  "mechanistic": true,
+  "mechanistic": false,
   "enable_thinking": false,
   "candidate_layers": [
     27,
@@ -99,16 +107,10 @@
     31
   ],
   "logit_path_check": {
-    "checked": true,
-    "max_abs_prob_difference": 1.1427903068295109e-10,
-    "argmax_agrees": true,
-    "within_tolerance": true
+    "checked": false,
+    "reason": "finalize without model"
   },
-  "timings_seconds": {
-    "behavioural": 302.7,
-    "activations": 37.8,
-    "interventions": 1686.5
-  },
+  "timings_seconds": {},
   "stale_scenarios": [],
   "cue_strings": {
     "floor": null,
@@ -118,5 +120,8 @@
     "partner_confirmed": "The supervising partner has confirmed:",
     "court": "The court has held:",
     "adverse": "The opposing party asserts:"
-  }
+  },
+  "stopped_early": true,
+  "n_measurements_written": 210,
+  "finalized_without_model": true
 }
