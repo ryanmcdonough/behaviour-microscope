@@ -1,0 +1,109 @@
+\begin{thebibliography}{13}
+\providecommand{\natexlab}[1]{#1}
+\providecommand{\url}[1]{\texttt{#1}}
+\expandafter\ifx\csname urlstyle\endcsname\relax
+  \providecommand{\doi}[1]{doi: #1}\else
+  \providecommand{\doi}{doi: \begingroup \urlstyle{rm}\Url}\fi
+
+\bibitem[Chen et~al.(2026)Chen, Parker, Bang, Bean, Seedat,
+  et~al.]{chen2026thomson}
+Shengzhuang Chen, Jerrod Parker, Yejin Bang, Andrew~M. Bean, Nabeel Seedat,
+  et~al.
+\newblock Thomson: Continual learning of frontier models for sovereignai, 2026.
+\newblock URL \url{https://arxiv.org/abs/2608.27147}.
+
+\bibitem[Dahl et~al.(2024)Dahl, Magesh, Suzgun, and Ho]{dahl2024legalfictions}
+Matthew Dahl, Varun Magesh, Mirac Suzgun, and Daniel~E. Ho.
+\newblock Large legal fictions: Profiling legal hallucinations in large
+  language models.
+\newblock \emph{Journal of Legal Analysis}, 16\penalty0 (1):\penalty0 64--93,
+  2024.
+\newblock \doi{10.1093/jla/laae003}.
+\newblock URL \url{https://academic.oup.com/jla/article/16/1/64/7699227}.
+
+\bibitem[{Gemma Team}(2025)]{gemmateam2025gemma3}
+{Gemma Team}.
+\newblock Gemma 3 technical report, 2025.
+\newblock URL \url{https://arxiv.org/abs/2503.19786}.
+
+\bibitem[Guha et~al.(2023)Guha, Nyarko, Ho, R\'{e}, Chilton,
+  et~al.]{guha2023legalbench}
+Neel Guha, Julian Nyarko, Daniel~E. Ho, Christopher R\'{e}, Adam Chilton,
+  et~al.
+\newblock {LegalBench}: A collaboratively built benchmark for measuring legal
+  reasoning in large language models.
+\newblock In \emph{Advances in Neural Information Processing Systems, Datasets
+  and Benchmarks Track}, 2023.
+\newblock URL \url{https://arxiv.org/abs/2308.11462}.
+
+\bibitem[Li et~al.(2025)Li, Guo, Gao, Chen, Zhao, Zhang, Liu, Wu, Yao, and
+  Wei]{li2025authority}
+Yuxuan Li, Xinwei Guo, Jiashi Gao, Guanhua Chen, Xiangyu Zhao, Jiaxin Zhang,
+  Quanying Liu, Haiyan Wu, Xin Yao, and Xuetao Wei.
+\newblock {LLM}s trust humans more, that's a problem! unveiling and mitigating
+  the authority bias in retrieval-augmented generation.
+\newblock In \emph{Proceedings of the 63rd Annual Meeting of the Association
+  for Computational Linguistics (Volume 1: Long Papers)}, pages 28844--28858,
+  2025.
+\newblock \doi{10.18653/v1/2025.acl-long.1400}.
+\newblock URL \url{https://aclanthology.org/2025.acl-long.1400/}.
+
+\bibitem[Maraia et~al.(2026)Maraia, Zanzotto, and Ranaldi]{maraia2026sounding}
+Gabriele Maraia, Fabio~Massimo Zanzotto, and Leonardo Ranaldi.
+\newblock Sounding vs. being an expert: Disentangling authority, register and
+  cultural impact in sycophantic {LLM}s.
+\newblock In \emph{Findings of the Association for Computational Linguistics:
+  ACL 2026}, pages 32492--32508, 2026.
+\newblock \doi{10.18653/v1/2026.findings-acl.1627}.
+\newblock URL \url{https://aclanthology.org/2026.findings-acl.1627/}.
+
+\bibitem[Perez et~al.(2022)Perez, Ringer, Luko\v{s}i\={u}t\.{e}, Nguyen, Chen,
+  et~al.]{perez2022modelwritten}
+Ethan Perez, Sam Ringer, Kamil\.{e} Luko\v{s}i\={u}t\.{e}, Karina Nguyen, Edwin
+  Chen, et~al.
+\newblock Discovering language model behaviors with model-written evaluations,
+  2022.
+\newblock URL \url{https://arxiv.org/abs/2212.09251}.
+
+\bibitem[Qi et~al.(2026)Qi, Rengarajan, Pereyra, Grupen, and
+  Pereyra]{harvey2026tenet}
+Calvin Qi, Vasudha Rengarajan, Julio Pereyra, Niko Grupen, and Gabe Pereyra.
+\newblock Harvey tenet research preview.
+\newblock Harvey research blog, August 2026.
+\newblock URL
+  \url{https://www.harvey.ai/blog/post-training-update-harvey-tenet}.
+\newblock Accessed 8 September 2026.
+
+\bibitem[{Qwen Team}(2025)]{qwen2025qwen3}
+{Qwen Team}.
+\newblock Qwen3 technical report, 2025.
+\newblock URL \url{https://arxiv.org/abs/2505.09388}.
+
+\bibitem[Sharma et~al.(2023)Sharma, Tong, Korbak, Duvenaud, Askell, Bowman,
+  et~al.]{sharma2023sycophancy}
+Mrinank Sharma, Meg Tong, Tomasz Korbak, David Duvenaud, Amanda Askell,
+  Samuel~R. Bowman, et~al.
+\newblock Towards understanding sycophancy in language models, 2023.
+\newblock URL \url{https://arxiv.org/abs/2310.13548}.
+
+\bibitem[{Thomson Reuters}(2026)]{thomson2026built}
+{Thomson Reuters}.
+\newblock How we built thomson.
+\newblock Thomson Reuters Institute, August 2026.
+\newblock URL
+  \url{https://www.thomsonreuters.com/en-us/posts/innovation/how-we-built-thomson/}.
+\newblock Accessed 8 September 2026.
+
+\bibitem[Wei et~al.(2024)Wei, Huang, Lu, Zhou, and Le]{wei2024synthetic}
+Jerry Wei, Da~Huang, Yifeng Lu, Denny Zhou, and Quoc~V. Le.
+\newblock Simple synthetic data reduces sycophancy in large language models,
+  2024.
+\newblock URL \url{https://arxiv.org/abs/2308.03958}.
+
+\bibitem[Zhang and Nanda(2024)]{zhang2024patching}
+Fred Zhang and Neel Nanda.
+\newblock Towards best practices of activation patching in language models:
+  Metrics and methods, 2024.
+\newblock URL \url{https://arxiv.org/abs/2309.16042}.
+
+\end{thebibliography}

@@ -1,0 +1,12 @@
+\contentsline {section}{\numberline {1}The question}{2}{section.1}%
+\contentsline {section}{\numberline {2}How I tested it}{2}{section.2}%
+\contentsline {section}{\numberline {3}Finding 1: two open models followed the partner instead of the rule}{3}{section.3}%
+\contentsline {section}{\numberline {4}Finding 2: the open models treated a partner much like a court}{4}{section.4}%
+\contentsline {section}{\numberline {5}Finding 3: seniority and the word confirmed each mattered}{5}{section.5}%
+\contentsline {section}{\numberline {6}What changed when the models reasoned for longer}{6}{section.6}%
+\contentsline {section}{\numberline {7}The legally trained and frontier models behaved differently}{7}{section.7}%
+\contentsline {section}{\numberline {8}What the internal intervention shows}{7}{section.8}%
+\contentsline {section}{\numberline {9}What I still cannot say}{8}{section.9}%
+\contentsline {section}{\numberline {10}What this means for legal AI}{9}{section.10}%
+\contentsline {section}{\numberline {11}Detailed methods and statistical reporting}{10}{section.11}%
+\contentsline {section}{\numberline {12}Conclusion}{11}{section.12}%

@@ -1,0 +1,182 @@
+{
+  "arms_run": [
+    "floor",
+    "junior_said",
+    "junior_confirmed",
+    "partner_said",
+    "partner_confirmed",
+    "court",
+    "adverse"
+  ],
+  "behavioural": {
+    "fpar_by_arm": {
+      "adverse": 0.0,
+      "court": 0.7857142857142857,
+      "floor": 0.06666666666666667,
+      "junior_confirmed": 0.07142857142857142,
+      "junior_said": 0.0,
+      "partner_confirmed": 0.5,
+      "partner_said": 0.03333333333333333
+    },
+    "n_scored_by_arm": {
+      "adverse": 30,
+      "court": 28,
+      "floor": 30,
+      "junior_confirmed": 28,
+      "junior_said": 30,
+      "partner_confirmed": 28,
+      "partner_said": 30
+    },
+    "accuracy_by_arm": {
+      "adverse": 1.0,
+      "court": 0.21428571428571427,
+      "floor": 0.9333333333333333,
+      "junior_confirmed": 0.9285714285714286,
+      "junior_said": 1.0,
+      "partner_confirmed": 0.5,
+      "partner_said": 0.9666666666666667
+    },
+    "parse_failures": 6,
+    "n_measurements": 210,
+    "headline_contrast": {
+      "low_authority_arm": "junior_said",
+      "high_authority_arm": "partner_said",
+      "n": 30,
+      "rate_control": 0.0,
+      "rate_partner": 0.03333333333333333,
+      "delta": 0.03333333333333333,
+      "discordant_partner_only": 1,
+      "discordant_control_only": 0,
+      "mcnemar_exact_p": 1.0
+    },
+    "authority_deference_delta": 0.03333333333333333
+  },
+  "planned_contrasts_binary": [
+    {
+      "arm_a": "junior_said",
+      "arm_b": "partner_said",
+      "isolates": "source (verb held at 'said')",
+      "n": 30,
+      "rate_a": 0.0,
+      "rate_b": 0.03333333333333333,
+      "difference": 0.03333333333333333,
+      "p_value": 1.0,
+      "test": "mcnemar_exact",
+      "p_holm": 1.0,
+      "significant_holm_05": false
+    },
+    {
+      "arm_a": "junior_confirmed",
+      "arm_b": "partner_confirmed",
+      "isolates": "source (verb held at 'confirmed')",
+      "n": 26,
+      "rate_a": 0.038461538461538464,
+      "rate_b": 0.5,
+      "difference": 0.46153846153846156,
+      "p_value": 0.00048828125,
+      "test": "mcnemar_exact",
+      "p_holm": 0.0029296875,
+      "significant_holm_05": true
+    },
+    {
+      "arm_a": "junior_said",
+      "arm_b": "junior_confirmed",
+      "isolates": "verb (source held at 'junior')",
+      "n": 28,
+      "rate_a": 0.0,
+      "rate_b": 0.07142857142857142,
+      "difference": 0.07142857142857142,
+      "p_value": 0.5,
+      "test": "mcnemar_exact",
+      "p_holm": 1.0,
+      "significant_holm_05": false
+    },
+    {
+      "arm_a": "partner_said",
+      "arm_b": "partner_confirmed",
+      "isolates": "verb (source held at 'partner')",
+      "n": 28,
+      "rate_a": 0.03571428571428571,
+      "rate_b": 0.5,
+      "difference": 0.4642857142857143,
+      "p_value": 0.000244140625,
+      "test": "mcnemar_exact",
+      "p_holm": 0.001708984375,
+      "significant_holm_05": true
+    },
+    {
+      "arm_a": "floor",
+      "arm_b": "junior_said",
+      "isolates": "any assertion at all, vs none",
+      "n": 30,
+      "rate_a": 0.06666666666666667,
+      "rate_b": 0.0,
+      "difference": -0.06666666666666667,
+      "p_value": 0.5,
+      "test": "mcnemar_exact",
+      "p_holm": 1.0,
+      "significant_holm_05": false
+    },
+    {
+      "arm_a": "partner_confirmed",
+      "arm_b": "court",
+      "isolates": "organisational vs legal authority",
+      "n": 26,
+      "rate_a": 0.5384615384615384,
+      "rate_b": 0.7692307692307693,
+      "difference": 0.23076923076923084,
+      "p_value": 0.0703125,
+      "test": "mcnemar_exact",
+      "p_holm": 0.3515625,
+      "significant_holm_05": false
+    },
+    {
+      "arm_a": "junior_said",
+      "arm_b": "adverse",
+      "isolates": "discounting an adverse source",
+      "n": 30,
+      "rate_a": 0.0,
+      "rate_b": 0.0,
+      "difference": 0.0,
+      "p_value": 1.0,
+      "test": "mcnemar_exact",
+      "p_holm": 1.0,
+      "significant_holm_05": false
+    }
+  ],
+  "factorial": {
+    "available": true,
+    "n": 26,
+    "cell_means": {
+      "junior_said": 0.0,
+      "junior_confirmed": 0.038461538461538464,
+      "partner_said": 0.038461538461538464,
+      "partner_confirmed": 0.5
+    },
+    "main_effect_source": {
+      "effect": "source (partner - junior)",
+      "mean": 0.25,
+      "ci_low": 0.1346153846153846,
+      "ci_high": 0.36538461538461536,
+      "p_value": 0.0007891129890156299,
+      "cohens_dz": 0.8574929257125441
+    },
+    "main_effect_verb": {
+      "effect": "verb (confirmed - said)",
+      "mean": 0.25,
+      "ci_low": 0.15384615384615385,
+      "ci_high": 0.36538461538461536,
+      "p_value": 0.0007891129890156299,
+      "cohens_dz": 0.8574929257125441
+    },
+    "interaction": {
+      "effect": "source x verb",
+      "mean": 0.4230769230769231,
+      "ci_low": 0.23076923076923078,
+      "ci_high": 0.6153846153846154,
+      "p_value": 0.0009111188771537128,
+      "cohens_dz": 0.8397191227596317
+    },
+    "measure": "accepted_false_proposition"
+  }
+}
