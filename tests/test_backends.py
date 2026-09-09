@@ -13,7 +13,13 @@ from unittest.mock import MagicMock
 import pytest
 
 from microscope import backends
-from microscope.backends import AnthropicBackend, Measurement, OpenAIBackend, _parse_letter
+from microscope.backends import (
+    AnthropicBackend,
+    Measurement,
+    OpenAIBackend,
+    OpenRouterBackend,
+    _parse_letter,
+)
 
 
 # --------------------------------------------------------------------------- parsing
@@ -52,9 +58,15 @@ def test_a_hedged_refusal_is_a_parse_failure_not_a_silent_default():
 # --------------------------------------------------------------------------- openai
 
 
-def _openai_response(text, top_logprobs=None):
+def _openai_response(text, top_logprobs=None, *, reasoning=None, reasoning_content=None,
+                     finish_reason="stop", provider=None):
     choice = MagicMock()
     choice.message.content = text
+    # Explicit, because an unset attribute on a MagicMock is a MagicMock rather than None and
+    # a test that relied on that would not be testing the branch it looks like it is testing.
+    choice.message.reasoning = reasoning
+    choice.message.reasoning_content = reasoning_content
+    choice.finish_reason = finish_reason
     if top_logprobs is None:
         choice.logprobs = None
     else:
@@ -69,6 +81,7 @@ def _openai_response(text, top_logprobs=None):
         choice.logprobs.content = [token_entry]
     response = MagicMock()
     response.choices = [choice]
+    response.provider = provider
     return response
 
 
@@ -215,6 +228,237 @@ def test_anthropic_sends_effort_rather_than_disabling_thinking(monkeypatch):
     assert sent["output_config"] == {"effort": "low"}
     assert "thinking" not in sent
     assert sent["model"] == "claude-opus-5"
+
+
+# ------------------------------------------------- reasoning over a chat-completions host
+
+# OpenAI hides a reasoning model's thought, so none of the shapes below can come from it. They
+# come from open-weights hybrids reached through a compatible host, which is what
+# `OpenRouterBackend` is for, and they are the reason `OpenAIBackend.measure` could not simply
+# go on parsing `content` the way it always had.
+
+
+THOUGHT = (
+    "The question asks about the deadline. Option A says 28 days, which is the figure\n"
+    "the partner used. But CPR 15.4 gives 14 days, so the answer is B."
+)
+
+
+def test_an_inline_thought_is_stripped_before_the_letter_is_read(monkeypatch):
+    """The bug. `_parse_letter` takes the *first* standalone A or B, so a thought that
+    discusses option A before settling on B was recorded as A -- silently, and with a plausible
+    letter in the column, which is why nothing downstream would have caught it."""
+    _install_fake_openai(monkeypatch, _openai_response(f"<think>{THOUGHT}</think>\nB"))
+    m = OpenAIBackend("some-model", reasoning_expected=True).measure("prompt")
+    assert m.chosen_letter == "B"
+    assert m.parse_ok is True
+    assert m.probability_source == "text"
+
+
+def test_an_inline_thought_is_stripped_even_when_reasoning_was_not_expected(monkeypatch):
+    """A host may serve a hybrid model that reasons by default. The flag says what we asked
+    for; the tags say what arrived, and the tags win."""
+    _install_fake_openai(monkeypatch, _openai_response(f"<think>{THOUGHT}</think>\nB"))
+    m = OpenAIBackend("some-model").measure("prompt")
+    assert m.chosen_letter == "B"
+
+
+@pytest.mark.parametrize("field", ["reasoning", "reasoning_content"])
+def test_a_thought_returned_beside_the_answer_does_not_delete_the_answer(monkeypatch, field):
+    """The opposite error, and the one a naive fix introduces. When the host has already taken
+    the thought out of `content`, `content` is the answer -- and `_strip_reasoning` on a
+    reasoning run maps an untagged string to "", so applying it here would turn every correctly
+    served answer into a parse failure. OpenRouter uses `reasoning`, vLLM `reasoning_content`."""
+    _install_fake_openai(monkeypatch, _openai_response("B", **{field: THOUGHT}))
+    m = OpenAIBackend("some-model", reasoning_expected=True).measure("prompt")
+    assert m.chosen_letter == "B"
+    assert m.parse_ok is True
+
+
+def test_a_separately_returned_thought_is_folded_back_into_the_stored_completion(monkeypatch):
+    """`behavioural.csv` should not record a different thing depending on which host served
+    the row, and `metrics.visible_answer` already knows how to strip a tagged block."""
+    from microscope import metrics
+
+    _install_fake_openai(monkeypatch, _openai_response("B", reasoning=THOUGHT))
+    m = OpenAIBackend("some-model", reasoning_expected=True).measure("prompt")
+    assert THOUGHT in m.generated
+    assert m.generated.startswith("<think>") and "</think>" in m.generated
+    assert metrics.visible_answer(m.generated) == "B"
+    assert metrics.is_elaborated(m.generated, "B") is False
+
+
+def test_a_thought_that_ran_out_of_budget_is_truncation_not_an_answer(monkeypatch):
+    """The distinction `probability_source` exists to keep: fixable by raising the budget
+    versus not fixable at all. Reading a letter out of this thought would report A."""
+    _install_fake_openai(
+        monkeypatch,
+        _openai_response(f"<think>{THOUGHT[:60]}", finish_reason="length"),
+    )
+    m = OpenAIBackend("some-model", reasoning_expected=True).measure("prompt")
+    assert m.chosen_letter is None
+    assert m.parse_ok is False
+    assert m.probability_source == "text_truncated"
+
+
+def test_an_empty_answer_beside_a_capped_thought_is_truncation(monkeypatch):
+    """The same failure in the other shape: the host put the thought in its own field and the
+    budget went entirely on it, leaving `content` empty."""
+    _install_fake_openai(
+        monkeypatch,
+        _openai_response("", reasoning=THOUGHT, finish_reason="length"),
+    )
+    m = OpenAIBackend("some-model", reasoning_expected=True).measure("prompt")
+    assert m.chosen_letter is None
+    assert m.probability_source == "text_truncated"
+
+
+def test_expecting_reasoning_suppresses_the_logprobs_request(monkeypatch):
+    """Not an optimisation. A logprob is read off the first token, and when the model thinks
+    out loud the first token opens the thought -- so the mass would be a real number about the
+    wrong thing, which is worse than no number at all."""
+    client = _install_fake_openai(monkeypatch, _openai_response("B", reasoning=THOUGHT))
+    OpenAIBackend("some-model", reasoning_expected=True).measure("prompt")
+    sent = client.chat.completions.create.call_args.kwargs
+    assert "logprobs" not in sent and "top_logprobs" not in sent
+
+
+def test_logprobs_are_discarded_when_a_thought_turns_up_unannounced(monkeypatch):
+    """Requested because no reasoning was expected, returned anyway, and describing the token
+    that opened the thought rather than the answer."""
+    import math
+
+    response = _openai_response(
+        f"<think>{THOUGHT}</think>\nB", [("A", math.log(0.7)), ("B", math.log(0.3))]
+    )
+    _install_fake_openai(monkeypatch, response)
+    m = OpenAIBackend("some-model").measure("prompt")
+    assert m.chosen_letter == "B"
+    assert m.probability_source == "text"
+    assert m.p_a is None and m.letter_mass is None
+
+
+def test_a_plain_completion_is_unaffected_by_any_of_this(monkeypatch):
+    """The regression guard for the 12 API runs already in `results/`."""
+    import math
+
+    response = _openai_response("A", [("A", math.log(0.8)), ("B", math.log(0.2))])
+    _install_fake_openai(monkeypatch, response)
+    m = OpenAIBackend("some-model").measure("prompt")
+    assert m.chosen_letter == "A"
+    assert m.probability_source == "logprobs"
+    assert m.p_a == pytest.approx(0.8, abs=1e-6)
+
+
+def test_the_manifest_records_which_shape_the_host_actually_used(monkeypatch):
+    """A run configured for reasoning that only ever saw "none" is not a reasoning run, and
+    without this nothing on disk would say so."""
+    _install_fake_openai(monkeypatch, _openai_response("B", reasoning=THOUGHT))
+    backend = OpenAIBackend("some-model", reasoning_expected=True)
+    assert backend.describe()["reasoning_channels"] == []
+    backend.measure("prompt")
+    assert backend.describe()["reasoning_channels"] == ["separate"]
+    assert backend.describe()["reasoning_expected"] is True
+
+
+# --------------------------------------------------------------------------- openrouter
+
+
+def _install_fake_openrouter(monkeypatch, response):
+    module = types.ModuleType("openai")
+    client = MagicMock()
+    client.chat.completions.create.return_value = response
+    module.OpenAI = MagicMock(return_value=client)
+    monkeypatch.setitem(sys.modules, "openai", module)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    return client, module.OpenAI
+
+
+def test_openrouter_pins_routing_and_sends_the_reasoning_switch(monkeypatch):
+    """Fallbacks off by default: a run that silently moves to a second upstream mid-sweep is a
+    mixture of serving configurations, not a measurement of a model."""
+    client, _ = _install_fake_openrouter(monkeypatch, _openai_response("B", reasoning=THOUGHT))
+    OpenRouterBackend("qwen/qwen3.5-9b", enable_thinking=True,
+                      providers=["deepinfra"], quantizations=["bf16"]).measure("prompt")
+    body = client.chat.completions.create.call_args.kwargs["extra_body"]
+    assert body["provider"] == {
+        "allow_fallbacks": False, "order": ["deepinfra"], "quantizations": ["bf16"],
+    }
+    assert body["reasoning"] == {"enabled": True}
+
+
+def test_openrouter_thinking_off_is_sent_explicitly_not_omitted(monkeypatch):
+    """The no-thinking arm is a measurement, not the absence of one. Leaving the switch out
+    would take whichever default the upstream happened to have."""
+    client, _ = _install_fake_openrouter(monkeypatch, _openai_response("B"))
+    backend = OpenRouterBackend("qwen/qwen3.5-9b", enable_thinking=False)
+    backend.measure("prompt")
+    body = client.chat.completions.create.call_args.kwargs["extra_body"]
+    assert body["reasoning"] == {"enabled": False}
+    assert backend.reasoning_expected is False
+
+
+def test_openrouter_is_sent_the_budget_field_it_actually_reads(monkeypatch):
+    """`max_completion_tokens` is OpenAI's spelling. A host that does not know the field drops
+    it silently and uses its own default, which on a reasoning run means every thought is
+    truncated at a budget this notebook never chose and the response never mentions."""
+    client, _ = _install_fake_openrouter(monkeypatch, _openai_response("B"))
+    OpenRouterBackend("qwen/qwen3.5-9b", max_tokens=3000).measure("prompt")
+    sent = client.chat.completions.create.call_args.kwargs
+    assert sent["max_tokens"] == 3000
+    assert "max_completion_tokens" not in sent
+
+
+def test_the_manifest_records_the_budget_that_was_actually_in_force(monkeypatch):
+    """`build_manifest` falls back to `RunConfig.max_gen_tokens` (default 24, a local-backend
+    knob) unless the backend reports its own. On a reasoning run the budget is the difference
+    between an answer and a truncated thought, so a manifest that misreports it is not a
+    reproducibility record."""
+    _install_fake_openrouter(monkeypatch, _openai_response("B"))
+    assert OpenRouterBackend("qwen/qwen3.5-9b", max_tokens=3000).describe()["max_gen_tokens"] == 3000
+    _install_fake_openai(monkeypatch, _openai_response("A"))
+    assert OpenAIBackend("some-model").describe()["max_gen_tokens"] == 256
+
+
+def test_openai_keeps_the_spelling_its_own_endpoint_requires(monkeypatch):
+    client = _install_fake_openai(monkeypatch, _openai_response("A"))
+    OpenAIBackend("some-model", max_tokens=256).measure("prompt")
+    sent = client.chat.completions.create.call_args.kwargs
+    assert sent["max_completion_tokens"] == 256
+    assert "max_tokens" not in sent
+
+
+def test_openrouter_records_the_upstream_that_served_the_run(monkeypatch):
+    """The only evidence a finished run has of what it actually measured."""
+    _install_fake_openrouter(monkeypatch, _openai_response("B", provider="DeepInfra"))
+    backend = OpenRouterBackend("qwen/qwen3.5-9b")
+    backend.measure("prompt")
+    described = backend.describe()
+    assert described["upstream_hosts"] == ["DeepInfra"]
+    assert described["backend"] == "openrouter"
+    assert described["base_url"].startswith("https://openrouter.ai")
+
+
+def test_openrouter_needs_its_own_key_not_the_openai_one(monkeypatch):
+    _install_fake_openrouter(monkeypatch, _openai_response("B"))
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "not-this-one")
+    with pytest.raises(RuntimeError, match="OPENROUTER_API_KEY"):
+        OpenRouterBackend("qwen/qwen3.5-9b")
+
+
+def test_openrouter_cannot_be_used_mechanistically(monkeypatch):
+    _install_fake_openrouter(monkeypatch, _openai_response("B"))
+    assert OpenRouterBackend("qwen/qwen3.5-9b").supports_mechanistic is False
+
+
+def test_backend_spec_builds_an_openrouter_backend(monkeypatch):
+    _install_fake_openrouter(monkeypatch, _openai_response("B"))
+    backend = backends.BackendSpec(
+        kind="openrouter", model_id="qwen/qwen3.5-9b", options={"enable_thinking": True},
+    ).build()
+    assert isinstance(backend, OpenRouterBackend)
+    assert backend.reasoning_expected is True
 
 
 # --------------------------------------------------------------------------- spec

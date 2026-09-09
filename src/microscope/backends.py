@@ -13,10 +13,16 @@ a `LocalBackend` and a closed-weights model simply cannot be passed to them by m
     LocalBackend       open weights via interp-engine   behavioural + mechanistic
     OpenAIBackend      OpenAI API                       behavioural only
     AnthropicBackend   Anthropic API                    behavioural only
+    OpenRouterBackend  open weights via OpenRouter      behavioural only
 
-Each provider uses its own official SDK. There is no OpenAI-compatible shim pointed at
-Anthropic or vice versa: the point of the comparison is that each model is asked in the way its
-own vendor intends, and a translation layer would put its own behaviour into the measurement.
+Each *vendor's* model is asked through that vendor's own official SDK. There is no
+OpenAI-compatible shim pointed at Anthropic or vice versa: the point of the comparison is that
+each model is asked in the way its own vendor intends, and a translation layer would put its
+own behaviour into the measurement.
+
+`OpenRouterBackend` is the one deliberate exception, and it exists for models that have no
+first-party API at all -- the open-weight bases the legal-AI vendors post-train. What it costs
+is written on the class.
 """
 
 from __future__ import annotations
@@ -179,6 +185,96 @@ def _parse_letter(text: str) -> tuple[str | None, bool]:
     return None, False
 
 
+def _message_reasoning(message) -> str | None:
+    """A thought returned *beside* the answer rather than inside it, or None.
+
+    OpenAI keeps a reasoning model's thought server-side and returns none of it, so the
+    completion is the answer and nothing else. Every other host that speaks the Chat
+    Completions dialect had to invent somewhere to put a hybrid open-weights model's
+    ``<think>`` block, and they did not agree: OpenRouter returns ``reasoning``, vLLM and
+    SGLang return ``reasoning_content``.
+
+    The presence of either field is the load-bearing signal, not its content. It means the host
+    has *already* taken the thought out of ``content``, so ``content`` is the answer and must
+    not be put through `_strip_reasoning` -- which, on a reasoning run, would correctly delete
+    an untagged string and thereby throw the answer away.
+    """
+    for field_name in ("reasoning", "reasoning_content"):
+        value = getattr(message, field_name, None)
+        if isinstance(value, str) and value.strip():
+            return value
+    return None
+
+
+@dataclass
+class _ChatAnswer:
+    """One Chat Completions choice, read into the pieces a `Measurement` needs."""
+
+    generated: str
+    letter: str | None
+    parse_ok: bool
+    truncated: bool
+    # "none", "inline" or "separate" -- which shape the host used for the thought. Recorded on
+    # the backend rather than the row: it is a property of the host, not of the item.
+    channel: str
+
+
+def _read_chat_answer(choice, *, reasoning_expected: bool = False) -> _ChatAnswer:
+    """Read a Chat Completions choice, wherever this particular host put the reasoning.
+
+    The three shapes a hybrid model's response arrives in, and why each needs its own branch:
+
+    ``inline``     ``content`` is ``<think>...</think>B``. This is the shape that made the
+                   parser here wrong: `_parse_letter` takes the *first* standalone A or B, and
+                   a thought that says "option A gives 28 days" three lines before answering B
+                   yields A. `_strip_reasoning` exists for exactly this and was never being
+                   called on this path, because OpenAI never produces this shape and OpenAI was
+                   the only thing this backend had ever talked to.
+    ``separate``   the thought is in ``message.reasoning``; ``content`` is already the answer.
+                   Stripping here would be the opposite error -- deleting a clean answer.
+    ``none``       an ordinary completion.
+
+    The thought is folded back into ``generated`` as a tagged block in the ``separate`` case,
+    so that what lands in ``behavioural.csv`` has one shape regardless of which host served it
+    and `metrics.visible_answer` can strip it the way it already strips a local run's.
+
+    Truncation is a distinct outcome from an unreadable answer -- the first is fixable by
+    raising the budget, the second is not -- and unlike the local path this one does not have
+    to infer it: ``finish_reason == "length"`` says so. It is only *read* as truncation on a
+    run that expected a thought, because a non-reasoning completion that hits the cap has
+    already emitted its letter.
+    """
+    message = choice.message
+    content = (message.content or "").strip()
+    out_of_band = _message_reasoning(message)
+    hit_cap = getattr(choice, "finish_reason", None) == "length"
+
+    if out_of_band is not None:
+        letter, parse_ok = _parse_letter(content)
+        return _ChatAnswer(
+            generated=f"<think>\n{out_of_band.strip()}\n</think>\n{content}".strip(),
+            letter=letter if content else None,
+            parse_ok=parse_ok and bool(content),
+            truncated=hit_cap and not content,
+            channel="separate",
+        )
+
+    inline = bool(_REASONING_START_RE.search(content) or _REASONING_END_RE.search(content))
+    if inline or reasoning_expected:
+        stripped = _strip_reasoning(content, reasoning_expected=reasoning_expected)
+        letter, parse_ok = _parse_letter(stripped)
+        return _ChatAnswer(
+            generated=content,
+            letter=letter,
+            parse_ok=parse_ok,
+            truncated=_reasoning_unfinished(content, reasoning_expected=reasoning_expected),
+            channel="inline" if inline else "none",
+        )
+
+    letter, parse_ok = _parse_letter(content)
+    return _ChatAnswer(content, letter, parse_ok, False, "none")
+
+
 # --------------------------------------------------------------------------- local
 
 
@@ -308,12 +404,22 @@ class LocalBackend:
 
 
 class OpenAIBackend:
-    """OpenAI Chat Completions.
+    """Chat Completions -- OpenAI's own endpoint, and the dialect other hosts imitate.
 
     Asks for token logprobs, which give the same forced-choice probability the local backend
     reports. A reasoning model may decline to return them, or may emit reasoning before the
     answer; in both cases this falls back to parsing the text and records which path was used
     in ``probability_source``, so the analysis never silently mixes the two.
+
+    ``reasoning_expected`` is for a hybrid open-weights model reached through a compatible host
+    (`OpenRouterBackend`), not for OpenAI's own reasoning models, whose thought never reaches
+    the client -- ``reasoning_effort`` is that knob. It does two things, both of which the
+    original OpenAI-only code had no reason to do and got wrong the moment anything else was
+    plugged in: it makes an untagged completion a *truncated thought* rather than an answer,
+    and it stops logprobs being requested at all. The second matters as much as the first. A
+    logprob is read off the response's first token, and when the model thinks out loud the
+    first token is ``<think``, so the numbers would be a distribution over how the thought
+    opens, correctly summing over "A" and "B" tokens that are nowhere near the answer.
     """
 
     supports_mechanistic = False
@@ -322,7 +428,15 @@ class OpenAIBackend:
     # almost entirely round-trip latency.
     concurrency_safe = True
 
-    def __init__(self, model_id: str, *, max_tokens: int = 256, reasoning_effort: str | None = None):
+    # OpenAI deprecated `max_tokens` for `max_completion_tokens`; the compatible hosts largely
+    # did not follow, and a budget field a host does not recognise is *ignored* rather than
+    # rejected. On a reasoning run that is the difference between an answer and 210 thoughts
+    # truncated at whatever default the upstream happened to use, with nothing in the response
+    # to say the field was dropped. Subclasses name the field their host actually reads.
+    _max_tokens_field = "max_completion_tokens"
+
+    def __init__(self, model_id: str, *, max_tokens: int = 256, reasoning_effort: str | None = None,
+                 reasoning_expected: bool = False):
         try:
             from openai import OpenAI
         except ImportError as exc:  # pragma: no cover - exercised only without the extra
@@ -334,15 +448,27 @@ class OpenAIBackend:
         self.model_id = model_id
         self.max_tokens = max_tokens
         self.reasoning_effort = reasoning_effort
+        self.reasoning_expected = reasoning_expected
+        # Which shapes the host actually used for the thought, accumulated over the run and
+        # reported into the manifest. A run that expected reasoning and saw only "none" did not
+        # get a reasoning run, and nothing else on disk would say so. Written from worker
+        # threads; a set insert is atomic and nothing reads it until the run ends.
+        self._channels_seen: set[str] = set()
 
     def measure(self, prompt: str) -> Measurement:
         request = {
             "model": self.model_id,
             "messages": [{"role": "user", "content": prompt}],
-            "max_completion_tokens": self.max_tokens,
+            self._max_tokens_field: self.max_tokens,
+            **self._request_extras(),
         }
         if self.reasoning_effort:
             request["reasoning_effort"] = self.reasoning_effort
+        elif self.reasoning_expected:
+            # Deliberately no logprobs: see the class docstring. The first token is the start
+            # of a thought, not the answer, so the mass read off it would be meaningless
+            # rather than merely absent -- and absent is the failure this run can survive.
+            pass
         else:
             request["logprobs"] = True
             # Five is the endpoint's ceiling, and it is ample: this is a two-option forced
@@ -354,26 +480,40 @@ class OpenAIBackend:
         response = self._create_with_logprob_fallback(request)
 
         choice = response.choices[0]
-        text = (choice.message.content or "").strip()
-        letter, parse_ok = _parse_letter(text)
+        answer = _read_chat_answer(choice, reasoning_expected=self.reasoning_expected)
+        self._channels_seen.add(answer.channel)
+        self._note_response(response)
 
-        mass = self._letter_mass_from_logprobs(choice)
+        # A thought turned up on a request that did not expect one -- a host serving a hybrid
+        # model that reasons by default, say. The letter has been read correctly either way,
+        # but any logprobs in hand describe the first token of the thought, so they are dropped
+        # rather than reported against an answer they are not about.
+        mass = None if answer.channel != "none" else self._letter_mass_from_logprobs(choice)
         if mass is None:
             return Measurement(
-                chosen_letter=letter, generated=text, parse_ok=parse_ok,
-                probability_source="text",
+                chosen_letter=answer.letter, generated=answer.generated,
+                parse_ok=answer.parse_ok,
+                probability_source="text_truncated" if answer.truncated else "text",
             )
         p_a, p_b = mass
         total = p_a + p_b
         return Measurement(
-            chosen_letter=letter or ("A" if p_a >= p_b else "B"),
-            generated=text,
+            chosen_letter=answer.letter or ("A" if p_a >= p_b else "B"),
+            generated=answer.generated,
             p_a=p_a, p_b=p_b, letter_mass=total,
             p_a_norm=p_a / total if total else 0.5,
             p_b_norm=p_b / total if total else 0.5,
-            parse_ok=parse_ok,
+            parse_ok=answer.parse_ok,
             probability_source="logprobs",
         )
+
+    def _note_response(self, response) -> None:
+        """Hook for a subclass that has something host-specific to record. No-op here."""
+        return None
+
+    def _request_extras(self) -> dict:
+        """Extra request fields a subclass needs. Nothing OpenAI's own endpoint accepts."""
+        return {}
 
     def _create_with_logprob_fallback(self, request: dict):
         """Send the request, and retry without logprobs if the model refuses them.
@@ -414,13 +554,126 @@ class OpenAIBackend:
 
     def describe(self) -> dict:
         return {
-            "backend": "openai",
+            "backend": self.name,
             "model": self.model_id,
             "reasoning_effort": self.reasoning_effort,
+            "reasoning_expected": self.reasoning_expected,
+            # `build_manifest` reads this name to record the budget that was actually in force.
+            # Without it the manifest falls back to `RunConfig.max_gen_tokens`, which is the
+            # local backend's knob and defaults to 24 -- so every API run so far has recorded a
+            # generation budget of 24 tokens while really running at 256. Harmless where the
+            # answer is one letter; not harmless on a reasoning run, where the budget is the
+            # difference between an answer and a truncated thought and the manifest is the only
+            # place a reader can check which one they are looking at.
+            "max_gen_tokens": self.max_tokens,
+            # Empty until the run has measured something. "none" on a run that asked for
+            # reasoning means the host did not deliver it, which invalidates the comparison
+            # this run was set up to make.
+            "reasoning_channels": sorted(self._channels_seen),
         }
 
     def shutdown(self) -> None:
         return None
+
+
+# --------------------------------------------------------------------------- openrouter
+
+
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+
+
+class OpenRouterBackend(OpenAIBackend):
+    """An open-weights model through OpenRouter, which speaks the Chat Completions dialect.
+
+    This is the documented exception to the rule at the top of this module, and it is here
+    because the alternative is worse. The models this experiment most needs -- the open-weight
+    bases the legal-AI vendors post-train -- have no first-party API at all. The choice is not
+    "vendor SDK or shim", it is "shim or nothing", and for a *behavioural* measurement, which
+    needs only a prompt and a letter, a shim is an acceptable instrument.
+
+    **What it costs, which any run measured here must carry in writing.** OpenRouter routes to
+    whichever upstream host is currently cheapest and fastest, and those hosts differ in
+    quantisation, sampler defaults and chat template. A deference rate at n=30 is not robust to
+    that, and `manifest.json` cannot pin something the client never chose. Two things are done
+    about it and neither is a fix: fallbacks are **off** by default, so a run fails rather than
+    silently continuing on a second host mid-sweep; and the host that actually served each call
+    is read off the response and recorded in `describe`, so a run that did move is at least
+    legible afterwards rather than merely wrong.
+
+    A number from here is a scout -- it says which way to point a GPU -- not a row in a results
+    table beside a locally-run model. See RESEARCH.md 4.
+    """
+
+    _max_tokens_field = "max_tokens"
+
+    def __init__(self, model_id: str, *, max_tokens: int = 256,
+                 enable_thinking: bool | None = None,
+                 providers: "list[str] | None" = None,
+                 quantizations: "list[str] | None" = None,
+                 allow_fallbacks: bool = False,
+                 extra_body: dict | None = None):
+        try:
+            from openai import OpenAI
+        except ImportError as exc:  # pragma: no cover - exercised only without the extra
+            raise RuntimeError("The OpenRouter backend needs `pip install openai`.") from exc
+        api_key = os.environ.get("OPENROUTER_API_KEY")
+        if not api_key:
+            raise RuntimeError("OPENROUTER_API_KEY is not set.")
+        self._client = OpenAI(api_key=api_key, base_url=OPENROUTER_BASE_URL)
+        self.name = "openrouter"
+        self.model_id = model_id
+        self.max_tokens = max_tokens
+        self.reasoning_effort = None
+        # A hybrid model reached this way reasons in the response body, so the parser has to be
+        # told -- which is the whole reason `reasoning_expected` exists. `None` means "take the
+        # host's default", and the default is not knowable from here, so it is recorded as
+        # unexpected and `reasoning_channels` in the manifest reports what actually arrived.
+        self.enable_thinking = enable_thinking
+        self.reasoning_expected = bool(enable_thinking)
+        self._channels_seen: set[str] = set()
+        self._hosts_seen: set[str] = set()
+
+        routing: dict = {"allow_fallbacks": allow_fallbacks}
+        if providers:
+            routing["order"] = list(providers)
+        if quantizations:
+            routing["quantizations"] = list(quantizations)
+        body: dict = {"provider": routing}
+        if enable_thinking is not None:
+            # OpenRouter's unified control. On a hybrid model this is what reaches the chat
+            # template's thinking switch; on a model with no reasoning mode it is ignored,
+            # which is the same no-op the local backend makes of `enable_thinking`.
+            body["reasoning"] = {"enabled": bool(enable_thinking)}
+        if extra_body:
+            body.update(extra_body)
+        self.extra_body = body
+        self.routing = routing
+
+    def _request_extras(self) -> dict:
+        return {"extra_body": self.extra_body}
+
+    def _note_response(self, response) -> None:
+        """Record which upstream host served this call.
+
+        OpenRouter puts it on the response as `provider`. It is the only evidence a finished
+        run has of what it actually measured, and with `allow_fallbacks` off it should be a
+        set of size one -- so a second entry is the signal that a run is not one measurement.
+        """
+        host = getattr(response, "provider", None)
+        if isinstance(host, str) and host:
+            self._hosts_seen.add(host)
+
+    def describe(self) -> dict:
+        described = super().describe()
+        described.update({
+            "base_url": OPENROUTER_BASE_URL,
+            "enable_thinking": self.enable_thinking,
+            "routing": self.routing,
+            # Size > 1 means the run was served by more than one upstream, at which point it is
+            # a mixture of serving configurations rather than a measurement of a model.
+            "upstream_hosts": sorted(self._hosts_seen),
+        })
+        return described
 
 
 # --------------------------------------------------------------------------- anthropic
@@ -559,4 +812,8 @@ class BackendSpec:
             return OpenAIBackend(self.model_id, **self.options)
         if self.kind == "anthropic":
             return AnthropicBackend(self.model_id, **self.options)
-        raise ValueError(f"Unknown backend kind {self.kind!r}; expected local, openai or anthropic")
+        if self.kind == "openrouter":
+            return OpenRouterBackend(self.model_id, **self.options)
+        raise ValueError(
+            f"Unknown backend kind {self.kind!r}; expected local, openai, anthropic or openrouter"
+        )

@@ -88,11 +88,23 @@ probability. That is why the **binary** acceptance rate is the primary cross-mod
 needs only the letter — and the continuous probability is secondary-where-available. Pass
 `samples=k` to estimate a proportion empirically instead.
 
+An open-weights model with no first-party API — the bases the legal-AI vendors post-train —
+can be reached behaviourally through OpenRouter, with its reasoning mode as a variable:
+
+```python
+run_all(RunConfig(model_id="qwen/qwen3.5-9b", provider="openrouter", mechanistic=False,
+                  provider_options={"enable_thinking": True, "max_tokens": 3000}))
+```
+
+**A run measured this way is a scout, not a result.** The weights are loaded by somebody else at
+a quantisation nobody here chose, so it says which way to point a GPU and nothing more; see
+[RESEARCH.md](RESEARCH.md) §4 and §5.5, and `notebooks/run_qwen35_openrouter.ipynb`.
+
 ### Locally
 
 ```bash
 pip install -e '.[dev]'          # add '.[apis]' for the OpenAI and Anthropic backends
-pytest                           # 54 tests, no GPU, model, or API key needed
+pytest                           # 133 tests, no GPU, model, or API key needed
 ```
 
 ```python

@@ -18,6 +18,7 @@ import os
 import platform
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -398,14 +399,26 @@ def run_behavioural(
         and getattr(backend, "concurrency_safe", False)
     )
 
+    # `measure_many` calls `store` from its worker threads, and `store` rewrites the whole
+    # checkpoint CSV through one fixed temporary path. Two threads finishing at once therefore
+    # raced on that path: both wrote it, the first `os.replace` consumed it, and the second
+    # died on a file that no longer existed -- taking the run with it, at whichever measurement
+    # the collision happened to land on. `Progress` is under the same lock because its counter
+    # and timer are ordinary attributes; racing there only garbles the ETA, but the lock is
+    # already held and uncontended for the microseconds it costs.
+    write_lock = threading.Lock()
+
     def store(index: int, measurement: Measurement) -> None:
         scenario, condition = pairs[index]
         prompt = scenario.prompt(condition)
+        # Each thread owns its own index, so the slot assignment needs no lock; only the
+        # whole-file rewrite that reads every slot does.
         slots[index] = _measurement_row(scenario, condition, prompt, measurement)
-        if csv_path is not None:
-            _write_behavioural_csv(csv_path, slots)
-        if progress:
-            progress.tick(f"{scenario.id} / {condition}")
+        with write_lock:
+            if csv_path is not None:
+                _write_behavioural_csv(csv_path, slots)
+            if progress:
+                progress.tick(f"{scenario.id} / {condition}")
 
     if not remaining:
         pass
@@ -1073,6 +1086,13 @@ def sweep_label(cfg: RunConfig) -> str:
     A reasoning-on and a reasoning-off run of the same model are two different measurements and
     must not collide in a results mapping.
     """
+    if cfg.provider == "openrouter":
+        # The same checkpoint measured twice, reasoning on and off. Falling through to the bare
+        # model id collided those into one key, and `run_sweep`'s de-duplication then labelled
+        # the second "#2" -- which reads as a repeat of one configuration rather than the other
+        # half of the comparison the sweep exists to make.
+        thinking = cfg.provider_options.get("enable_thinking")
+        return f"{cfg.model_id} ({'thinking' if thinking else 'no thinking'})"
     if cfg.provider != "local":
         return cfg.model_id
     return f"{cfg.model_id} ({'thinking' if cfg.enable_thinking else 'no thinking'})"
