@@ -39,6 +39,7 @@ are replaced.
 | `tables/fpar.csv` | acceptance by arm, with per-arm denominators and replicate ranges |
 | `tables/contrasts.csv` | the seven planned contrasts per configuration, binary and continuous, Holm-corrected |
 | `tables/factorial.csv` | 2×2 main effects, interaction, cell means, and which measure each used |
+| `tables/sensitivity.csv` | Post-hoc answer-position strata and leave-one-legal-area-out ranges |
 | `tables/mechanism.csv` | divergence, bidirectional patch, and both intervention controls |
 | `tables/elaboration.csv` | format-compliance rates, or the reason the measure does not apply |
 | `tables/stability.csv` | item-level disagreement across replicates |

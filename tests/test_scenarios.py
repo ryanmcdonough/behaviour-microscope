@@ -6,6 +6,8 @@ from microscope.scenarios import (
     ARMS,
     ARMS_BY_NAME,
     CONDITIONS,
+    CONTROL_CONDITIONS,
+    CUE_VARIANTS,
     DEFAULT_CONTRAST,
     FACTORIAL_CELLS,
     PLANNED_CONTRASTS,
@@ -44,7 +46,8 @@ def test_asserting_arms_differ_only_in_the_cue_sentence():
     for s in SCENARIOS:
         prompts = s.prompts()
         base = prompts["junior_said"]
-        for name, arm in ARMS_BY_NAME.items():
+        for name in CONDITIONS:
+            arm = ARMS_BY_NAME[name]
             if not arm.asserts or name == "junior_said":
                 continue
             swapped = base.replace(ARMS_BY_NAME["junior_said"].cue, arm.cue)
@@ -96,6 +99,53 @@ def test_both_propositions_appear_as_options_in_every_arm():
             assert s.false_proposition in prompt, s.id
             expected = 2 if ARMS_BY_NAME[condition].asserts else 1
             assert prompt.count(s.false_proposition) == expected, f"{s.id}/{condition}"
+
+
+def test_neutral_prompt_removes_credibility_labels_without_changing_content():
+    for s in SCENARIOS:
+        prompt = s.prompt("partner_said", prompt_style="neutral")
+        assert "AUTHORITATIVE MATERIAL" not in prompt
+        assert "ADDITIONAL INFORMATION" not in prompt
+        assert "TEXT 1" in prompt and "TEXT 2" in prompt
+        assert s.authoritative_evidence in prompt
+        assert s.false_proposition in prompt
+
+
+def test_option_swap_crosses_the_answer_key_and_preserves_propositions():
+    for s in SCENARIOS:
+        ordinary = s.prompt("partner_said")
+        swapped = s.prompt("partner_said", swap_options=True)
+        assert s.correct_letter_for(swap_options=True) == s.false_letter
+        assert s.false_letter_for(swap_options=True) == s.correct_letter
+        assert f"A: {s.options['B']}" in swapped
+        assert f"B: {s.options['A']}" in swapped
+        assert ordinary != swapped
+
+
+def test_true_controls_reuse_the_checked_correct_proposition():
+    assert CONTROL_CONDITIONS
+    for s in SCENARIOS:
+        for condition in CONTROL_CONDITIONS:
+            prompt = s.prompt(condition)
+            assert s.correct_proposition in prompt
+            assert prompt.count(s.correct_proposition) == 2, f"{s.id}/{condition}"
+            assert ARMS_BY_NAME[condition].asserted_truth is True
+
+
+def test_cue_variants_change_rank_wording_without_changing_the_factorial():
+    scenario = SCENARIOS[0]
+    for variant in CUE_VARIANTS:
+        prompts = {
+            name: scenario.prompt(name, cue_variant=variant)
+            for name in ("junior_said", "junior_confirmed", "partner_said", "partner_confirmed")
+        }
+        assert all(scenario.false_proposition in prompt for prompt in prompts.values())
+        assert "has said:" in prompts["junior_said"]
+        assert "has said:" in prompts["partner_said"]
+        assert "has confirmed:" in prompts["junior_confirmed"]
+        assert "has confirmed:" in prompts["partner_confirmed"]
+    assert "junior" not in scenario.prompt("junior_said", cue_variant="hierarchy_explicit").lower()
+    assert "partner" not in scenario.prompt("partner_said", cue_variant="legal_roles").lower()
 
 
 def test_unknown_condition_is_refused():

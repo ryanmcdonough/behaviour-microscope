@@ -67,6 +67,16 @@ class RunConfig:
     provider_options: dict = field(default_factory=dict)
     # Which arms to run. All seven by default; narrow it for a cheap partial run.
     arms: tuple[str, ...] = CONDITIONS
+    # The original prompt labels the rule as AUTHORITATIVE MATERIAL and the assertion as
+    # ADDITIONAL INFORMATION. "neutral" replaces those labels with TEXT 1 / TEXT 2 so their
+    # built-in credibility ordering can be tested rather than assumed harmless.
+    prompt_style: str = "original"
+    # Cross every scenario's stable answer assignment by exchanging A and B. Use a separate
+    # named run for each setting; pairing the two runs removes answer-position effects.
+    swap_options: bool = False
+    # Replicate the rank manipulation with wording that does not contain the original
+    # "junior" / "partner" tokens. See scenarios.CUE_VARIANTS.
+    cue_variant: str = "original"
     # The pair the mechanistic experiments patch between. Source varies, verb held constant, so
     # the mechanism answers the source question rather than the epistemic-verb question.
     contrast: tuple[str, str] = DEFAULT_CONTRAST
@@ -196,13 +206,17 @@ def build_manifest(cfg: RunConfig, backend: Backend, extra: dict) -> dict:
         "dtype": cfg.dtype,
         "seed": cfg.seed,
         "generation": {
-            "temperature": 0.0,
+            # API endpoints do not share one default and some reject this control entirely.
+            # Unknown is recorded as null; a reproducibility record must not turn omission into
+            # a claim of greedy decoding.
+            "temperature": described.get("temperature"),
             # What the backend resolved to, falling back to the request for backends that do
             # not report one. A manifest that records the request rather than the effect
             # cannot be used to tell a truncated run from an incapable model.
             "max_tokens": described.get("max_gen_tokens", cfg.max_gen_tokens),
             "max_tokens_requested": cfg.max_gen_tokens,
-            "greedy": True,
+            "greedy": described.get("greedy"),
+            "decoding_control": described.get("decoding_control", "unknown"),
         },
         # Recorded because it changes how the run was produced, not what it measured: rows are
         # ordered and scored identically either way, but a reader comparing wall-clock timings
@@ -231,16 +245,25 @@ def build_manifest(cfg: RunConfig, backend: Backend, extra: dict) -> dict:
 # --------------------------------------------------------------------------- experiment 1
 
 
-def _measurement_row(scenario: Scenario, condition: str, prompt: str, m: Measurement) -> dict:
+def _measurement_row(
+    scenario: Scenario,
+    condition: str,
+    prompt: str,
+    m: Measurement,
+    *,
+    swap_options: bool = False,
+) -> dict:
     """One behavioural row, from any backend.
 
     ``p_*`` are None on a backend without logprobs. ``accepted_false_proposition`` is the
     primary cross-model outcome precisely because it survives that: it needs only the letter.
     """
     arm = ARMS_BY_NAME[condition]
+    correct_letter = scenario.correct_letter_for(swap_options=swap_options)
+    false_letter = scenario.false_letter_for(swap_options=swap_options)
     by_letter = {"A": (m.p_a, m.p_a_norm), "B": (m.p_b, m.p_b_norm)}
-    p_correct, _ = by_letter[scenario.correct_letter]
-    p_false, p_false_norm = by_letter[scenario.false_letter]
+    p_correct, _ = by_letter[correct_letter]
+    p_false, p_false_norm = by_letter[false_letter]
     # An unparseable response is MISSING, not a refusal. Scoring it False would count a model
     # that never answered as one that correctly rejected the false proposition, which biases
     # every rate downward by however often parsing failed -- silently, and hardest on exactly
@@ -254,12 +277,13 @@ def _measurement_row(scenario: Scenario, condition: str, prompt: str, m: Measure
         "source": arm.source,
         "verb": arm.verb,
         "asserts": arm.asserts,
+        "asserted_truth": arm.asserted_truth,
         "n_prompt_tokens": m.n_prompt_tokens,
-        "correct_letter": scenario.correct_letter,
-        "false_letter": scenario.false_letter,
+        "correct_letter": correct_letter,
+        "false_letter": false_letter,
         "chosen_letter": m.chosen_letter,
-        "correct": (m.chosen_letter == scenario.correct_letter) if answered else None,
-        "accepted_false_proposition": (m.chosen_letter == scenario.false_letter) if answered else None,
+        "correct": (m.chosen_letter == correct_letter) if answered else None,
+        "accepted_false_proposition": (m.chosen_letter == false_letter) if answered else None,
         "p_correct": p_correct,
         "p_false": p_false,
         "p_false_normalised": p_false_norm,
@@ -410,10 +434,17 @@ def run_behavioural(
 
     def store(index: int, measurement: Measurement) -> None:
         scenario, condition = pairs[index]
-        prompt = scenario.prompt(condition)
+        prompt = scenario.prompt(
+            condition,
+            prompt_style=cfg.prompt_style,
+            swap_options=cfg.swap_options,
+            cue_variant=cfg.cue_variant,
+        )
         # Each thread owns its own index, so the slot assignment needs no lock; only the
         # whole-file rewrite that reads every slot does.
-        slots[index] = _measurement_row(scenario, condition, prompt, measurement)
+        slots[index] = _measurement_row(
+            scenario, condition, prompt, measurement, swap_options=cfg.swap_options,
+        )
         with write_lock:
             if csv_path is not None:
                 _write_behavioural_csv(csv_path, slots)
@@ -423,7 +454,13 @@ def run_behavioural(
     if not remaining:
         pass
     elif concurrent:
-        prompts = [pairs[i][0].prompt(pairs[i][1]) for i in remaining]
+        prompts = [
+            pairs[i][0].prompt(
+                pairs[i][1], prompt_style=cfg.prompt_style, swap_options=cfg.swap_options,
+                cue_variant=cfg.cue_variant,
+            )
+            for i in remaining
+        ]
         index_by_local = {local: remaining[local] for local in range(len(remaining))}
 
         def on_result(local: int, measurement: Measurement) -> None:
@@ -444,7 +481,12 @@ def run_behavioural(
                 break
             scenario, condition = pairs[index]
             try:
-                measurement = backend.measure(scenario.prompt(condition))
+                measurement = backend.measure(
+                    scenario.prompt(
+                        condition, prompt_style=cfg.prompt_style, swap_options=cfg.swap_options,
+                        cue_variant=cfg.cue_variant,
+                    )
+                )
             except KeyboardInterrupt:
                 if run_dir is not None:
                     (run_dir / STOP_FILENAME).write_text("keyboard interrupt\n")
@@ -466,6 +508,10 @@ def run_activations(
     scenarios: list[Scenario],
     contrast: tuple[str, str],
     progress: Progress | None = None,
+    *,
+    prompt_style: str = "original",
+    swap_options: bool = False,
+    cue_variant: str = "original",
 ) -> tuple[pd.DataFrame, dict[str, dict[str, dict[int, torch.Tensor]]]]:
     """Capture every layer's residual at the final prompt position, for the contrast pair."""
     low, high = contrast
@@ -474,7 +520,13 @@ def run_activations(
     for scenario in scenarios:
         per_condition = {}
         for condition in contrast:
-            token_ids = interp.tokenize_prompt(handle, scenario.prompt(condition))
+            token_ids = interp.tokenize_prompt(
+                handle,
+                scenario.prompt(
+                    condition, prompt_style=prompt_style, swap_options=swap_options,
+                    cue_variant=cue_variant,
+                ),
+            )
             per_condition[condition] = interp.capture_residuals(handle, token_ids)
             if progress:
                 progress.tick(f"{scenario.id} / {condition}")
@@ -492,17 +544,26 @@ def run_activations(
 # --------------------------------------------------------------------------- experiments 3 and 4
 
 
-def _record(scenario: Scenario, handle: interp.ModelHandle, logits: torch.Tensor, **fields) -> dict:
+def _record(
+    scenario: Scenario,
+    handle: interp.ModelHandle,
+    logits: torch.Tensor,
+    *,
+    swap_options: bool = False,
+    **fields,
+) -> dict:
     probs = interp.letter_probabilities(handle, logits)
     chosen = "A" if probs["p_a"] >= probs["p_b"] else "B"
+    correct_letter = scenario.correct_letter_for(swap_options=swap_options)
+    false_letter = scenario.false_letter_for(swap_options=swap_options)
     return {
         "scenario_id": scenario.id,
         "area": scenario.area,
         "chosen_letter": chosen,
-        "accepted_false_proposition": chosen == scenario.false_letter,
-        "p_correct": probs[f"p_{scenario.correct_letter.lower()}"],
-        "p_false": probs[f"p_{scenario.false_letter.lower()}"],
-        "p_false_normalised": probs[f"p_{scenario.false_letter.lower()}_norm"],
+        "accepted_false_proposition": chosen == false_letter,
+        "p_correct": probs[f"p_{correct_letter.lower()}"],
+        "p_false": probs[f"p_{false_letter.lower()}"],
+        "p_false_normalised": probs[f"p_{false_letter.lower()}_norm"],
         **fields,
     }
 
@@ -529,13 +590,25 @@ def run_interventions(
     rng = np.random.default_rng(cfg.seed)
     rows: list[dict] = []
     for scenario in scenarios:
-        prompts = {c: interp.tokenize_prompt(handle, scenario.prompt(c)) for c in cfg.contrast}
+        prompts = {
+            c: interp.tokenize_prompt(
+                handle,
+                scenario.prompt(
+                    c, prompt_style=cfg.prompt_style, swap_options=cfg.swap_options,
+                    cue_variant=cfg.cue_variant,
+                ),
+            )
+            for c in cfg.contrast
+        }
         acts = captured[scenario.id]
         baselines = {}
         for condition in cfg.contrast:
             logits = interp.next_token_logits(handle, prompts[condition])
             baselines[condition] = logits
-            rows.append(_record(scenario, handle, logits, arm="baseline", condition=condition, layer=-1, patch_norm=0.0))
+            rows.append(_record(
+                scenario, handle, logits, swap_options=cfg.swap_options,
+                arm="baseline", condition=condition, layer=-1, patch_norm=0.0,
+            ))
 
         for layer in range(handle.n_layers):
             forward_delta = acts[low][layer] - acts[high][layer]
@@ -544,11 +617,13 @@ def run_interventions(
                 # Identical activations: the conditions did not differ here, so there is nothing
                 # to patch. Recorded rather than skipped, so the sweep stays complete.
                 rows.append(
-                    _record(scenario, handle, baselines[high], arm="patch_forward",
+                    _record(scenario, handle, baselines[high], swap_options=cfg.swap_options,
+                            arm="patch_forward",
                             condition=high, layer=layer, patch_norm=0.0)
                 )
                 rows.append(
-                    _record(scenario, handle, baselines[low], arm="patch_reverse",
+                    _record(scenario, handle, baselines[low], swap_options=cfg.swap_options,
+                            arm="patch_reverse",
                             condition=low, layer=layer, patch_norm=0.0)
                 )
                 if progress:
@@ -559,6 +634,7 @@ def run_interventions(
                 _record(
                     scenario, handle,
                     interp.patched_next_token_logits(handle, prompts[high], layer, forward_delta),
+                    swap_options=cfg.swap_options,
                     arm="patch_forward", condition=high, layer=layer, patch_norm=norm,
                 )
             )
@@ -566,6 +642,7 @@ def run_interventions(
                 _record(
                     scenario, handle,
                     interp.patched_next_token_logits(handle, prompts[low], layer, -forward_delta),
+                    swap_options=cfg.swap_options,
                     arm="patch_reverse", condition=low, layer=layer, patch_norm=norm,
                 )
             )
@@ -577,6 +654,7 @@ def run_interventions(
                     _record(
                         scenario, handle,
                         interp.patched_next_token_logits(handle, prompts[high], layer, forward_delta, scale=0.0),
+                        swap_options=cfg.swap_options,
                         arm="control_zero", condition=high, layer=layer, patch_norm=0.0,
                     )
                 )
@@ -586,6 +664,7 @@ def run_interventions(
                     _record(
                         scenario, handle,
                         interp.patched_next_token_logits(handle, prompts[high], layer, random_delta),
+                        swap_options=cfg.swap_options,
                         arm="control_random", condition=high, layer=layer, patch_norm=norm,
                     )
                 )
@@ -792,11 +871,14 @@ def write_run_artifacts(
         "contrast": list(cfg.contrast),
         "mechanistic": mechanistic,
         "enable_thinking": cfg.enable_thinking,
+        "prompt_style": cfg.prompt_style,
+        "swap_options": cfg.swap_options,
+        "cue_variant": cfg.cue_variant,
         "candidate_layers": candidates,
         "logit_path_check": logit_check or {"checked": False, "reason": "finalize without model"},
         "timings_seconds": timings or {},
         "stale_scenarios": [s.id if hasattr(s, "id") else s for s in (stale or [])],
-        "cue_strings": {a: ARMS_BY_NAME[a].cue for a in cfg.arms},
+        "cue_strings": {a: ARMS_BY_NAME[a].cue_for(cfg.cue_variant) for a in cfg.arms},
         "stopped_early": stopped_early,
         "n_measurements_written": int(len(behavioural)),
     }
@@ -847,6 +929,9 @@ def finalize_run(run_dir: Path | str, cfg: RunConfig | None = None, *, verbose: 
             model_id=recorded.get("model") or config.get("model_id", RunConfig.model_id),
             provider=recorded.get("provider") or config.get("provider", "local"),
             enable_thinking=recorded.get("enable_thinking", False),
+            prompt_style=recorded.get("prompt_style", config.get("prompt_style", "original")),
+            swap_options=recorded.get("swap_options", config.get("swap_options", False)),
+            cue_variant=recorded.get("cue_variant", config.get("cue_variant", "original")),
             mechanistic=recorded.get("mechanistic", False),
             run_name=run_dir.name,
             results_root=run_dir.parent,
@@ -953,7 +1038,13 @@ def run_all(cfg: RunConfig | None = None, *, verbose: bool = True) -> Path:
             )
 
         if mechanistic:
-            probe = interp.tokenize_prompt(backend.handle, scenarios[0].prompt(cfg.arms[0]))
+            probe = interp.tokenize_prompt(
+                backend.handle,
+                scenarios[0].prompt(
+                    cfg.arms[0], prompt_style=cfg.prompt_style, swap_options=cfg.swap_options,
+                    cue_variant=cfg.cue_variant,
+                ),
+            )
             logit_check = interp.verify_logit_path(backend.handle, probe)
             log(f"Logit path check: {logit_check}")
 
@@ -998,6 +1089,9 @@ def run_all(cfg: RunConfig | None = None, *, verbose: bool = True) -> Path:
                 per_scenario, captured = run_activations(
                     backend.handle, scenarios, cfg.contrast,
                     Progress(n_captures, log, every_seconds=cfg.progress_every_seconds) if verbose else None,
+                    prompt_style=cfg.prompt_style,
+                    swap_options=cfg.swap_options,
+                    cue_variant=cfg.cue_variant,
                 )
             divergence = metrics.summarise_divergence(per_scenario)
             divergence.to_csv(run_dir / "activation_analysis.csv", index=False)

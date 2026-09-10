@@ -1,7 +1,7 @@
 # Results digest
 
 **Generated** by `scripts/build_stack.py` — do not edit. Re-run it after dropping a new
-run into `results/` and every number here moves with the evidence. Built 2026-09-08 19:47 UTC.
+run into `results/` and every number here moves with the evidence. Built 2026-09-10 07:52 UTC.
 
 Narrative, theory and the limits on what may be claimed: `PAPER_BRIEF.md`.
 

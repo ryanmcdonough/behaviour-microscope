@@ -213,7 +213,7 @@ def test_an_untagged_truncated_thought_needs_the_reasoning_flag():
 
 
 def _fake_run(tmp_path, name, *, model, commit, timestamp, quality="pass", thinking=False,
-              effort=None, rows=210):
+              effort=None, rows=210, manifest_extra=None):
     import json as _json
 
     d = tmp_path / name
@@ -221,10 +221,12 @@ def _fake_run(tmp_path, name, *, model, commit, timestamp, quality="pass", think
     backend = {"backend": "local"}
     if effort:
         backend["effort"] = effort
-    (d / "manifest.json").write_text(_json.dumps({
+    manifest = {
         "model": model, "git_commit": commit, "timestamp_utc": timestamp,
         "enable_thinking": thinking, "backend": backend, "versions": {"interp_engine": "1.6.0"},
-    }))
+    }
+    manifest.update(manifest_extra or {})
+    (d / "manifest.json").write_text(_json.dumps(manifest))
     (d / "quality_report.json").write_text(_json.dumps({"overall": quality, "checks": []}))
     header = "scenario_id,condition,chosen_letter,correct,accepted_false_proposition\n"
     body = "".join(f"s{i},floor,B,True,False\n" for i in range(rows))
@@ -276,3 +278,33 @@ def test_effort_and_reasoning_are_separate_configurations(tmp_path):
     _fake_run(tmp_path, "med", model="claude-opus-5", commit="bb18eda",
               timestamp="2026-09-08T11:00:00+00:00", effort="medium")
     assert len(runlib.select_current(runlib.discover([tmp_path]))) == 2
+
+
+def test_control_run_cannot_supersede_the_main_experiment(tmp_path):
+    from microscope import runs as runlib
+
+    _fake_run(tmp_path, "main", model="Qwen/Qwen3-14B", commit="old",
+              timestamp="2026-09-08T10:00:00+00:00")
+    _fake_run(
+        tmp_path, "neutral", model="Qwen/Qwen3-14B", commit="new",
+        timestamp="2026-09-10T10:00:00+00:00",
+        manifest_extra={"prompt_style": "neutral", "arms": runlib.ARMS},
+    )
+    selected = runlib.select_current(runlib.discover([tmp_path]))
+    assert len(selected) == 2
+    assert {r.label for group in selected.values() for r in group} == {"main", "neutral"}
+
+
+def test_shorter_control_run_can_be_complete_when_its_arm_set_is_recorded(tmp_path):
+    from microscope import runs as runlib
+
+    arms = ["junior_said", "junior_confirmed", "partner_said", "partner_confirmed"]
+    _fake_run(
+        tmp_path, "factorial", model="Qwen/Qwen3-14B", commit="new",
+        timestamp="2026-09-10T10:00:00+00:00", rows=120,
+        manifest_extra={"cue_variant": "legal_roles", "arms": arms},
+    )
+    found = runlib.discover([tmp_path])
+    assert len(found) == 1
+    assert found[0].complete
+    assert not found[0].is_main_design

@@ -381,6 +381,9 @@ class LocalBackend:
         return {
             "backend": "local",
             "model": self.model_id,
+            "temperature": 0.0,
+            "greedy": True,
+            "decoding_control": "client_enforced",
             "engine_backend": self.handle.backend,
             "n_layers": self.handle.n_layers,
             "d_model": self.handle.d_model,
@@ -436,7 +439,7 @@ class OpenAIBackend:
     _max_tokens_field = "max_completion_tokens"
 
     def __init__(self, model_id: str, *, max_tokens: int = 256, reasoning_effort: str | None = None,
-                 reasoning_expected: bool = False):
+                 reasoning_expected: bool = False, temperature: float | None = None):
         try:
             from openai import OpenAI
         except ImportError as exc:  # pragma: no cover - exercised only without the extra
@@ -449,6 +452,10 @@ class OpenAIBackend:
         self.max_tokens = max_tokens
         self.reasoning_effort = reasoning_effort
         self.reasoning_expected = reasoning_expected
+        # None is deliberate: several current reasoning endpoints reject sampling knobs. The
+        # manifest must record an uncontrolled provider default rather than inventing greedy
+        # decoding. Compatible hosts may opt in to an explicit value.
+        self.temperature = temperature
         # Which shapes the host actually used for the thought, accumulated over the run and
         # reported into the manifest. A run that expected reasoning and saw only "none" did not
         # get a reasoning run, and nothing else on disk would say so. Written from worker
@@ -462,6 +469,8 @@ class OpenAIBackend:
             self._max_tokens_field: self.max_tokens,
             **self._request_extras(),
         }
+        if self.temperature is not None:
+            request["temperature"] = self.temperature
         if self.reasoning_effort:
             request["reasoning_effort"] = self.reasoning_effort
         elif self.reasoning_expected:
@@ -558,6 +567,9 @@ class OpenAIBackend:
             "model": self.model_id,
             "reasoning_effort": self.reasoning_effort,
             "reasoning_expected": self.reasoning_expected,
+            "temperature": self.temperature,
+            "greedy": True if self.temperature == 0.0 else None,
+            "decoding_control": "client_requested" if self.temperature is not None else "provider_default",
             # `build_manifest` reads this name to record the budget that was actually in force.
             # Without it the manifest falls back to `RunConfig.max_gen_tokens`, which is the
             # local backend's knob and defaults to 24 -- so every API run so far has recorded a
@@ -611,6 +623,7 @@ class OpenRouterBackend(OpenAIBackend):
                  providers: "list[str] | None" = None,
                  quantizations: "list[str] | None" = None,
                  allow_fallbacks: bool = False,
+                 temperature: float | None = None,
                  extra_body: dict | None = None):
         try:
             from openai import OpenAI
@@ -624,6 +637,7 @@ class OpenRouterBackend(OpenAIBackend):
         self.model_id = model_id
         self.max_tokens = max_tokens
         self.reasoning_effort = None
+        self.temperature = temperature
         # A hybrid model reached this way reasons in the response body, so the parser has to be
         # told -- which is the whole reason `reasoning_expected` exists. `None` means "take the
         # host's default", and the default is not knowable from here, so it is recorded as
@@ -782,6 +796,9 @@ class AnthropicBackend:
             "model": self.model_id,
             "effort": self.effort,
             "samples": self.samples,
+            "temperature": None,
+            "greedy": None,
+            "decoding_control": "provider_default",
         }
 
     def shutdown(self) -> None:

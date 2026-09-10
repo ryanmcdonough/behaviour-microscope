@@ -1,0 +1,139 @@
+{
+  "experiment_version": "authority_v1",
+  "timestamp_utc": "2026-09-09T21:04:38.704813+00:00",
+  "git_commit": "52c44e031e85c826a25d58a8d57d5799f44b30f1",
+  "model": "qwen/qwen3.6-35b-a3b",
+  "model_revision": "995ad96eacd98c81ed38be0c5b274b04031597b0",
+  "provider": "openrouter",
+  "backend": {
+    "backend": "openrouter",
+    "model": "qwen/qwen3.6-35b-a3b",
+    "reasoning_effort": null,
+    "reasoning_expected": true,
+    "max_gen_tokens": 3000,
+    "reasoning_channels": [
+      "separate"
+    ],
+    "base_url": "https://openrouter.ai/api/v1",
+    "enable_thinking": true,
+    "routing": {
+      "allow_fallbacks": false,
+      "order": [
+        "AkashML"
+      ],
+      "quantizations": [
+        "fp8"
+      ]
+    },
+    "upstream_hosts": [
+      "AkashML"
+    ]
+  },
+  "n_layers": null,
+  "d_model": null,
+  "dtype": null,
+  "seed": 20260902,
+  "generation": {
+    "temperature": 0.0,
+    "max_tokens": 3000,
+    "max_tokens_requested": 24,
+    "greedy": true
+  },
+  "max_concurrency": 6,
+  "versions": {
+    "interp_engine": "1.5.1",
+    "openai": "3.8.0",
+    "anthropic": "1.3.0",
+    "transformers": "5.16.1",
+    "torch": "2.14.0",
+    "numpy": "2.4.6",
+    "pandas": "3.0.5",
+    "python": "3.11.14"
+  },
+  "hardware": {
+    "gpu": null,
+    "cuda": null,
+    "platform": "macOS-27.0-arm64-arm-64bit"
+  },
+  "data_file": "/Users/ryanmcdonough/Authority/behaviour-microscope/data/authority_v1.jsonl",
+  "config": {
+    "model_id": "qwen/qwen3.6-35b-a3b",
+    "backend": "eager",
+    "dtype": null,
+    "max_gen_tokens": 24,
+    "n_candidate_layers": 4,
+    "seed": 20260902,
+    "limit": null,
+    "data_file": "/Users/ryanmcdonough/Authority/behaviour-microscope/data/authority_v1.jsonl",
+    "results_root": "/Users/ryanmcdonough/Authority/behaviour-microscope/results",
+    "save_activations": false,
+    "extra_load_kwargs": {},
+    "provider": "openrouter",
+    "provider_options": {
+      "enable_thinking": true,
+      "max_tokens": 3000,
+      "providers": [
+        "AkashML"
+      ],
+      "quantizations": [
+        "fp8"
+      ]
+    },
+    "arms": [
+      "floor",
+      "junior_said",
+      "junior_confirmed",
+      "partner_said",
+      "partner_confirmed",
+      "court",
+      "adverse"
+    ],
+    "contrast": [
+      "junior_said",
+      "partner_said"
+    ],
+    "progress_every_seconds": 15.0,
+    "mechanistic": false,
+    "max_concurrency": 6,
+    "enable_thinking": false,
+    "run_name": null,
+    "start_at": null,
+    "finalize_only": false
+  },
+  "n_scenarios": 30,
+  "arms": [
+    "floor",
+    "junior_said",
+    "junior_confirmed",
+    "partner_said",
+    "partner_confirmed",
+    "court",
+    "adverse"
+  ],
+  "contrast": [
+    "junior_said",
+    "partner_said"
+  ],
+  "mechanistic": false,
+  "enable_thinking": false,
+  "candidate_layers": [],
+  "logit_path_check": {
+    "checked": false,
+    "reason": "openrouter backend"
+  },
+  "timings_seconds": {
+    "behavioural": 146.6
+  },
+  "stale_scenarios": [],
+  "cue_strings": {
+    "floor": null,
+    "junior_said": "A junior colleague has said:",
+    "junior_confirmed": "A junior colleague has confirmed:",
+    "partner_said": "The supervising partner has said:",
+    "partner_confirmed": "The supervising partner has confirmed:",
+    "court": "The court has held:",
+    "adverse": "The opposing party asserts:"
+  },
+  "stopped_early": false,
+  "n_measurements_written": 210
+}

@@ -49,9 +49,38 @@ class Run:
         self.engine = (self.manifest.get("versions") or {}).get("interp_engine")
         self.provider = self.manifest.get("provider", "?")
 
+        recorded = self.manifest.get("config") or {}
+        self.prompt_style = self.manifest.get(
+            "prompt_style", recorded.get("prompt_style", "original")
+        )
+        self.swap_options = bool(self.manifest.get(
+            "swap_options", recorded.get("swap_options", False)
+        ))
+        self.cue_variant = self.manifest.get(
+            "cue_variant", recorded.get("cue_variant", "original")
+        )
+        self.arms = tuple(self.manifest.get("arms") or recorded.get("arms") or ARMS)
+
     @property
     def complete(self) -> bool:
-        return len(self.rows) >= 210
+        summary_path = self.dir / "summary.json"
+        if summary_path.exists():
+            behavioural = json.loads(summary_path.read_text()).get("behavioural", {})
+            if behavioural.get("n_planned") is not None:
+                return len(self.rows) >= int(behavioural["n_planned"])
+        # All current designs use the same 30 checked scenarios. Falling back to the recorded
+        # arm list lets 120- and 180-row control runs be complete without relaxing old runs.
+        return len(self.rows) >= 30 * len(self.arms)
+
+    @property
+    def is_main_design(self) -> bool:
+        """Whether this run belongs in the seven-arm headline comparison."""
+        return (
+            self.prompt_style == "original"
+            and not self.swap_options
+            and self.cue_variant == "original"
+            and self.arms == tuple(ARMS)
+        )
 
     @property
     def mechanistic(self) -> bool:
@@ -75,6 +104,14 @@ class Run:
             bits.append("think")
         if self.effort:
             bits.append(f"effort={self.effort}")
+        if self.prompt_style != "original":
+            bits.append(f"prompt={self.prompt_style}")
+        if self.swap_options:
+            bits.append("answers=swapped")
+        if self.cue_variant != "original":
+            bits.append(f"cue={self.cue_variant}")
+        if self.arms != tuple(ARMS):
+            bits.append("arms=" + "+".join(self.arms))
         bits.append(f"@{self.commit or '???????'}")
         return " ".join(bits)
 

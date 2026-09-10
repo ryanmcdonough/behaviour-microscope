@@ -135,6 +135,51 @@ def table_factorial(selected) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def table_sensitivity(selected) -> pd.DataFrame:
+    """Post-hoc checks that reuse the main behavioural rows.
+
+    These do not replace the preregistered answer-swap run. They show whether the central paired
+    effect disappears when either answer position or any one legal area is removed.
+    """
+    rows = []
+    contrasts = {
+        "floor_to_partner_confirmed": ("floor", "partner_confirmed"),
+        "junior_said_to_partner_said": ("junior_said", "partner_said"),
+    }
+    for config, group in sorted(selected.items(), key=lambda kv: tier_sort(kv[0])):
+        frame = pd.read_csv(group[0].dir / "behavioural.csv")
+        pivot = frame.pivot(
+            index="scenario_id", columns="condition", values="accepted_false_proposition"
+        )
+        metadata = (
+            frame[frame["condition"] == "floor"]
+            .set_index("scenario_id")[["area", "false_letter"]]
+        )
+        data = pivot.join(metadata)
+        row = {"configuration": config}
+        for label, (arm_a, arm_b) in contrasts.items():
+            if arm_a not in data or arm_b not in data:
+                continue
+            paired = data.dropna(subset=[arm_a, arm_b]).copy()
+            paired["difference"] = (
+                paired[arm_b].astype(float) - paired[arm_a].astype(float)
+            )
+            row[f"{label}_n"] = len(paired)
+            row[f"{label}_difference"] = paired["difference"].mean()
+            for letter in ("A", "B"):
+                stratum = paired[paired["false_letter"] == letter]
+                row[f"{label}_false_{letter}"] = stratum["difference"].mean()
+                row[f"{label}_false_{letter}_n"] = len(stratum)
+            leave_one_area_out = [
+                paired.loc[paired["area"] != area, "difference"].mean()
+                for area in paired["area"].dropna().unique()
+            ]
+            row[f"{label}_leave_area_min"] = min(leave_one_area_out)
+            row[f"{label}_leave_area_max"] = max(leave_one_area_out)
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
 def table_mechanism(selected) -> pd.DataFrame:
     rows = []
     for config, group in sorted(selected.items(), key=lambda kv: tier_sort(kv[0])):
@@ -519,14 +564,23 @@ def main() -> None:
     (out / "figures").mkdir(parents=True, exist_ok=True)
 
     discovered = runlib.discover([args.results])
-    selected = runlib.select_current(discovered)
-    left_out = runlib.superseded(discovered, selected)
-    print(f"{len(discovered)} runs discovered, {len(selected)} configurations selected")
+    selected_all = runlib.select_current(discovered)
+    selected = {
+        config: group for config, group in selected_all.items()
+        if group and group[0].is_main_design and group[0].provider != "openrouter"
+    }
+    left_out = runlib.superseded(discovered, selected_all)
+    n_controls = len(selected_all) - len(selected)
+    print(
+        f"{len(discovered)} runs discovered, {len(selected)} main configurations selected"
+        f" ({n_controls} control configurations kept separate)"
+    )
 
     tables = {
         "fpar": table_fpar(selected),
         "contrasts": table_contrasts(selected),
         "factorial": table_factorial(selected),
+        "sensitivity": table_sensitivity(selected),
         "mechanism": table_mechanism(selected),
         "elaboration": table_elaboration(selected),
         "stability": table_stability(selected),

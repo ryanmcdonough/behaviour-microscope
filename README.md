@@ -85,8 +85,10 @@ run_all(RunConfig(model_id="claude-opus-5", provider="anthropic",
 
 The Anthropic Messages API exposes no token logprobs, so Claude yields a chosen letter and no
 probability. That is why the **binary** acceptance rate is the primary cross-model measure — it
-needs only the letter — and the continuous probability is secondary-where-available. Pass
-`samples=k` to estimate a proportion empirically instead.
+needs only the letter — and the continuous probability is secondary-where-available. API decoding
+is recorded as provider-default unless a backend explicitly accepts and receives a temperature;
+the manifest does not infer greedy decoding from an omitted parameter. Pass `samples=k` to estimate
+a proportion empirically instead.
 
 An open-weights model with no first-party API — the bases the legal-AI vendors post-train —
 can be reached behaviourally through OpenRouter, with its reasoning mode as a variable:
@@ -104,7 +106,7 @@ a quantisation nobody here chose, so it says which way to point a GPU and nothin
 
 ```bash
 pip install -e '.[dev]'          # add '.[apis]' for the OpenAI and Anthropic backends
-pytest                           # 133 tests, no GPU, model, or API key needed
+pytest                           # no GPU, model, or API key needed
 ```
 
 ```python
@@ -112,6 +114,20 @@ from microscope.experiment import RunConfig, run_all
 
 run_all(RunConfig(model_id="google/gemma-3-12b-it"))
 ```
+
+### Submission controls
+
+The minimum robustness controls are implemented as resumable behavioural runs: neutral prompt
+headings, reversed answer order, two alternate hierarchy phrasings, and true-proposition cue arms.
+On a GPU runtime, run all five for a model with:
+
+```bash
+python scripts/run_submission_controls.py --model google/gemma-3-12b-it
+python scripts/run_submission_controls.py --model Qwen/Qwen3-14B
+```
+
+Use `--only neutral-headings` (or another control name) to run one configuration. The full set is
+840 behavioural forwards per model and never reruns the mechanistic experiment.
 
 A CPU smoke run that exercises every code path in a couple of minutes:
 

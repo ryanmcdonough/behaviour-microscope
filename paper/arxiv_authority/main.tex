@@ -15,7 +15,7 @@
 \usepackage[hidelinks]{hyperref}
 
 \hypersetup{
-  pdftitle={Will the AI Follow the Law or the Partner?},
+  pdftitle={The Partner Said So: Authority Cues Can Reverse Otherwise-Correct Legal Answers},
   pdfauthor={Ryan McDonough},
   pdfsubject={Authority deference in legal language models},
   pdfkeywords={legal AI, authority, sycophancy, language models, evaluation}
@@ -30,15 +30,15 @@
 \newcommand{\model}[1]{\texttt{#1}}
 \newcommand{\arm}[1]{\texttt{#1}}
 
-\title{\textbf{Will the AI Follow the Law or the Partner?}\\[4pt]
-\large What language models do when legal authority and workplace authority conflict}
+\title{\textbf{The Partner Said So}\\[4pt]
+\large Authority cues can reverse otherwise-correct legal answers}
 
 \author{Ryan McDonough\\
 \small Independent researcher\\
 \small \texttt{me@ryanmcdonough.co.uk}}
 
 % Keep this date fixed. arXiv may rebuild source files at a later date.
-\date{Working paper, 9 September 2026}
+\date{Working paper, 10 September 2026}
 
 \begin{document}
 \maketitle
@@ -50,22 +50,23 @@ right rule. This paper asks a different question: will they continue to apply
 that rule when a senior colleague says the answer is wrong? I gave six language
 models 30 short questions based on England-and-Wales law. Each prompt contained
 the governing material, so the answer did not depend on memory or retrieval. I
-then changed only the person credited with a conflicting false answer. Two open
+then changed only the person credited with a conflicting false answer. Two evaluated open
 models were almost perfect when no person was mentioned: Qwen3-14B answered all
 30 questions correctly and Gemma-3-12B-IT answered 29. When a supervising
 partner was said to have confirmed the false answer, the same models answered
 only five and four correctly. They reacted almost identically when the false
 answer was attributed to a court, but rejected it when it came from an opposing
 party. Separate tests show that both seniority and the word ``confirmed'' moved
-the models towards the false answer. Longer reasoning reduced the effect, and a
-legally post-trained open model behaved much better, although the design cannot
-show that legal training caused the difference. Three frontier models showed
+the models towards the false answer. Longer reasoning reduced the effect on Qwen,
+while Thomson-1.0-Small provided an important boundary condition with much less
+organisational deference. The comparison cannot show that legal training caused
+that difference. Three evaluated frontier models showed
 smaller effects or none on these deliberately easy questions. An internal-state
 intervention transferred the source effect in both directions on the two open
 models, but does not by itself reveal an ``authority feature'' or a complete
-mechanism. The practical result is an evaluation gap: a model can know the law
-under benchmark conditions and fail to apply it inside a professional
-hierarchy.
+mechanism. The result is a large but model-dependent vulnerability and an
+evaluation gap: neutral capability tests can miss failures induced by workplace
+context. It does not estimate prevalence across models or deployed legal systems.
 \end{abstract}
 
 \tableofcontents
@@ -99,7 +100,7 @@ stated view even when it is wrong\citep{perez2022modelwritten,sharma2023sycophan
 It is narrower than a general test of agreeableness. The models did not accept
 the false statement from everyone. They largely ignored an opposing party and a
 junior colleague, while responding strongly to a supervising partner and a
-court. The problem is therefore the hierarchy the models applied, not simple
+court. The observed error is therefore source-sensitive rather than simple
 credulity. Recent work has found related authority effects in retrieval systems
 and has separated credentials from authoritative-sounding language
 \citep{li2025authority,maraia2026sounding}. This study puts that problem inside
@@ -192,6 +193,14 @@ partner ``confirmed'' the same statement. Qwen's corresponding rates were 0\%,
 Restating the wrong proposition was not enough. The opposing party's assertion
 contained the same false information, yet both models almost always rejected
 it. Who was credited with the statement changed the answer.
+
+A post-hoc sensitivity analysis using the existing rows shows that the result
+is not confined to one answer position or legal area. The increase from the
+neutral condition to ``partner confirmed'' remains between 79.2 and 87.5
+percentage points for each model when any one legal area is omitted. It is also
+positive when the false answer is A (94.1 points for each model) and when it is
+B (69.2 points for each). The magnitude still differs by answer position, so
+this check does not replace the planned order-swap experiment.
 
 \begin{table}[ht]
 \centering
@@ -303,7 +312,7 @@ high. GPT-5.1's token probabilities showed the same general shape: neither cue
 moved it much alone, but the combination did. This resemblance is suggestive,
 not proof of a common process.
 
-\section{The legally trained and frontier models behaved differently}
+\section{Thomson and the frontier models bound the claim}
 
 Thomson-1.0-Small was much less responsive to workplace authority than Gemma or
 Qwen. Without reasoning, it made no errors when a partner merely ``said'' the
@@ -311,11 +320,15 @@ false answer and two errors when the partner ``confirmed'' it. It made eight
 errors under the court cue. With reasoning enabled, it accepted none of the 27
 completed partner-confirmed answers and six of the 26 completed court answers.
 
-This is a desirable ordering, but the study cannot attribute it to legal
-post-training alone. Thomson-1.0-Small has a newer mixture-of-experts base model,
-not the Qwen3-14B checkpoint used in the main comparison. Architecture, scale,
-base-model generation, and post-training all differ. A test of Thomson's base
-checkpoint is needed to isolate the contribution of legal training.
+This is lower susceptibility on the false-cue instrument, but the study cannot
+attribute it to legal post-training. Thomson-1.0-Small's model card lists
+Snowdon1.1-Small as its base checkpoint and Qwen3.6-35B-A3B as its architecture;
+that metadata does not by itself establish Snowdon's weight provenance. Thomson
+is not a post-training derivative of the Qwen3-14B checkpoint used in the main
+comparison. Architecture, scale, model generation, value re-alignment,
+continual pre-training, and legal post-training therefore differ together.
+Thomson establishes that the large binary effect is not universal among
+released open-weight legal checkpoints; it does not identify why.
 
 The closed frontier models were also near the bottom of the error scale. Across
 three repeats, GPT-5.6-sol had a median error rate of zero in every condition,
@@ -388,8 +401,8 @@ ordering on Thomson and GPT-5.1.
 
 \item \textbf{The source labels also differ as words.} The four-cell test keeps
 one phrase fixed for each main comparison, but ``junior'' and ``partner'' have
-different lexical associations as well as different social status. A
-syntactically and token-length-matched control is still needed.
+different lexical associations as well as different social status. The runner
+implements two alternative phrasings, but their results are not yet available.
 
 \item \textbf{The headings may affect every condition.} The prompt calls the
 rule ``AUTHORITATIVE MATERIAL'' and the contradiction ``ADDITIONAL
@@ -399,8 +412,10 @@ may suppress the absolute error rate and contribute to the frontier ceiling.
 
 \item \textbf{Every attributed proposition is false.} The study measures
 resistance to bad authority. It does not yet test whether models accept a true
-correction from an appropriate source. A true-cue condition is needed to
-separate well-calibrated source use from blanket disregard.
+correction from an appropriate source. The runner implements true-cue conditions,
+but their results are not yet available. On these easy items,
+continuous probability movement or harder ambiguous questions may be more
+informative than another binary ceiling.
 
 \item \textbf{Answer order is not fully balanced.} Each scenario keeps the same
 answer order across all seven versions, which protects the paired comparisons.
@@ -411,6 +426,13 @@ other. Absolute rates and cross-model comparisons may still be affected.
 models at ceiling accuracy, and two models do not expose token probabilities.
 Claude's tendency to elaborate is interesting but was found after the main
 analysis and is not a substitute for a planned continuous measure.
+
+\item \textbf{API decoding was not controlled.} The API clients omitted a
+temperature parameter, leaving decoding at the provider default; historical
+manifests incorrectly labelled those runs as greedy. Their letters are sampled
+behavioural outcomes, not deterministic argmax decisions. The local Gemma,
+Qwen, and Thomson logits runs used client-enforced greedy inference and are not
+affected.
 
 \item \textbf{Some reasoning answers did not finish.} Truncation occurred mainly
 under the stronger authority cues. Reported rates for reasoning models are
@@ -451,9 +473,10 @@ change behaviour. Thomson-1.0-Small itself shows that a specialised checkpoint
 need not reproduce the large effect found on Gemma and Qwen.
 
 The narrower conclusion is still important. A capability benchmark cannot tell
-a developer or buyer whether this failure is present or whether post-training
-has removed it. Evaluation should include matched workplace tests that preserve
-the underlying legal problem while varying who wants an answer to be true.
+a developer or buyer whether this failure is present; behavioural differences
+alone also cannot show which training stage produced the difference. Evaluation
+should include matched workplace tests that preserve the underlying legal problem
+while varying who wants an answer to be true.
 
 Reasoning may help, but should be tested rather than assumed. The present Qwen
 result suggests that longer deliberation can reduce organisational pressure
@@ -462,13 +485,15 @@ incomplete under the strongest combined cue, and longer answers introduce their
 own completion and cost problems.
 
 The next experiments are therefore practical: replace the suggestive prompt
-headings with neutral labels; run every item in both answer orders; add true
-corrections from appropriate sources; make the legal questions hard enough to
-move frontier models away from ceiling; and add an open-ended task in which the
-model must write a short legal memorandum. Mitigations such as evidence-first
-prompting and explicit verification instructions should be tested alongside
-ordinary instruction-following, so that resistance to a false partner claim is
-not purchased by ignoring legitimate directions.
+headings with neutral labels; run every item in both answer orders; replicate the
+rank contrast with independent wording; add true corrections from appropriate
+sources; make the legal questions hard enough to move frontier models away from
+ceiling; and add an open-ended task in which the model must write a short legal
+memorandum. The runner now implements the first four controls as separate,
+auditable configurations, but their results are not yet available. Mitigations
+such as evidence-first prompting and explicit verification instructions should
+be tested alongside ordinary instruction-following, so that resistance to a
+false partner claim is not purchased by ignoring legitimate directions.
 
 \section{Detailed methods and statistical reporting}
 
@@ -477,6 +502,9 @@ distribution at the answer position. Reasoning runs generated a trace and
 parsed the eventual answer. Unanswered or truncated rows were treated as
 missing, not wrong. The Qwen reasoning run omitted 6 of 210 rows and the Thomson
 reasoning run omitted 8, predominantly in the strongest-authority conditions.
+API runs used provider-default decoding because the clients sent no temperature
+parameter. Repeats are therefore sampled outcomes rather than independent
+observations or deterministic argmax decisions.
 
 Where token probabilities were available, probability mass on the false letter
 was normalised over A and B. This continuous measure is more sensitive than the
@@ -506,8 +534,10 @@ run as controls.
 The repository records the 30 scenarios, prompt builder, local and API
 backends, paired metrics, quality checks, plots, and run manifests. Each
 manifest records the model identifier, revision where available, software
-versions, random seed, generation settings, cue strings, hardware, code commit,
-and timings. Runs that failed their quality checks were excluded. The two
+versions, random seed, requested generation settings, cue strings, hardware,
+code commit, and timings. The current runner records uncontrolled API decoding
+as unknown rather than inferring greedy decoding from an omitted parameter.
+Runs that failed their quality checks were excluded. The two
 reasoning runs were retained with warning status and explicit denominators.
 
 Independent local greedy runs reproduced exactly for the tested Gemma and
@@ -542,21 +572,23 @@ bundles remain aligned.
 
 \section{Conclusion}
 
-Two open instruction-tuned models applied supplied legal rules almost perfectly
-until a supervising partner was credited with the opposite answer. They did not
+Two evaluated open instruction-tuned models applied supplied legal rules almost
+perfectly until a supervising partner was credited with the opposite answer.
+They did not
 accept the same false statement indiscriminately: they largely ignored a junior
 and an opposing party, responded separately to seniority and stronger wording,
 and treated the strongest partner cue much like a court.
 
-Longer reasoning and the legally post-trained model produced better behaviour,
-while the frontier models exposed the limits of a test built from easy,
-bright-line questions. The internal-state experiment shows that the source
-difference is carried in a causally consequential state from around the middle
-of the two open networks, but does not supply a complete mechanism.
+Other configurations, especially Thomson-1.0-Small and the evaluated frontier
+models, show that the large binary effect is not universal and expose the
+limits of a test built from easy, bright-line questions. The internal-state
+experiment shows that the source difference is carried in a causally
+consequential state from around the middle of the two open networks, but does
+not supply a complete mechanism.
 
-The broad lesson is methodological. Knowing the law under neutral conditions is
-not the same as applying it inside a hierarchy. Legal-AI evaluations should test
-both.
+The broad lesson is methodological. Knowing the law under neutral conditions
+does not establish that a model will retain the answer when workplace authority
+points elsewhere. Legal-AI evaluations should test both conditions.
 
 \bibliographystyle{plainnat}
 \bibliography{references}

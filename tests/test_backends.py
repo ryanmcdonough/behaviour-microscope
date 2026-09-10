@@ -361,6 +361,18 @@ def test_the_manifest_records_which_shape_the_host_actually_used(monkeypatch):
     assert backend.describe()["reasoning_expected"] is True
 
 
+def test_api_manifest_does_not_invent_greedy_decoding(monkeypatch):
+    from microscope import experiment
+
+    _install_fake_openai(monkeypatch, _openai_response("B"))
+    monkeypatch.setattr(experiment, "_model_revision", lambda _: None)
+    backend = OpenAIBackend("some-model")
+    manifest = experiment.build_manifest(experiment.RunConfig(model_id="some-model"), backend, {})
+    assert manifest["generation"]["temperature"] is None
+    assert manifest["generation"]["greedy"] is None
+    assert manifest["generation"]["decoding_control"] == "provider_default"
+
+
 # --------------------------------------------------------------------------- openrouter
 
 
@@ -396,6 +408,15 @@ def test_openrouter_thinking_off_is_sent_explicitly_not_omitted(monkeypatch):
     body = client.chat.completions.create.call_args.kwargs["extra_body"]
     assert body["reasoning"] == {"enabled": False}
     assert backend.reasoning_expected is False
+
+
+def test_openrouter_can_request_and_record_greedy_decoding(monkeypatch):
+    client, _ = _install_fake_openrouter(monkeypatch, _openai_response("B"))
+    backend = OpenRouterBackend("qwen/qwen3.5-9b", temperature=0.0)
+    backend.measure("prompt")
+    assert client.chat.completions.create.call_args.kwargs["temperature"] == 0.0
+    assert backend.describe()["temperature"] == 0.0
+    assert backend.describe()["greedy"] is True
 
 
 def test_openrouter_is_sent_the_budget_field_it_actually_reads(monkeypatch):
@@ -603,6 +624,16 @@ def test_unparseable_answers_are_missing_not_refusals():
     answered = _measurement_row(s, "partner_said", "prompt",
                                 Measurement(chosen_letter=s.false_letter, generated="B"))
     assert answered["accepted_false_proposition"] is True
+
+    swapped = _measurement_row(
+        s,
+        "partner_said",
+        "prompt",
+        Measurement(chosen_letter=s.correct_letter, generated=s.correct_letter),
+        swap_options=True,
+    )
+    assert swapped["false_letter"] == s.correct_letter
+    assert swapped["accepted_false_proposition"] is True
 
 
 def test_generation_budget_reaches_the_local_backend():

@@ -1,13 +1,13 @@
-# The Partner Said So: Language Models Miscalibrate Organisational and Legal Authority
+# The Partner Said So: Authority Cues Can Reverse Otherwise-Correct Legal Answers
 
 **Anonymous authors**  
 **Affiliations withheld for review**
 
-> **Draft status (8 September 2026).** This is a working manuscript, not a submission-ready
+> **Draft status (10 September 2026).** This is a working manuscript, not a submission-ready
 > paper. The quantitative claims are tied to the generated results in `paper/RESULTS.md`.
-> Author details, venue formatting, an ethics statement, and several preregistered controls remain
-> to be added. The neutral-headings and answer-order controls listed in Section 7 should be run
-> before the claim set is frozen.
+> Venue-specific formatting and the final blinded or unblinded author block remain to be added.
+> The first four controls listed in Section 7 are implemented but should be run before the claim
+> set is frozen.
 
 ## Abstract
 
@@ -15,23 +15,24 @@ Legal language models are usually evaluated on whether they know or can retrieve
 Professional use poses a different problem: whether a model continues to apply that rule when a
 senior colleague wants a conflicting answer. We introduce a paired, seven-arm evaluation of
 authority deference in which 30 England-and-Wales legal scenarios contain the governing material
-in the prompt and vary only the source credited with a false proposition. Two open instruction-
-tuned models were nearly perfect without social pressure—Qwen3-14B answered 30/30 neutral items
+in the prompt and vary only the source credited with a false proposition. Two evaluated open
+instruction-tuned models were nearly perfect without social pressure—Qwen3-14B answered 30/30 neutral items
 correctly and Gemma-3-12B-IT answered 29/30—yet accepted the same false proposition in 83.3% and
 86.7% of cases, respectively, when it was “confirmed” by a supervising partner. Neither model
 distinguished that cue from “the court has held” (86.7% for both models). A 2×2 manipulation shows
 that seniority and the epistemic verb each independently increase false-proposition acceptance,
 with large, approximately additive effects. Enabling reasoning on Qwen3-14B sharply reduced
 deference to organisational authority while largely preserving responsiveness to a court cue.
-A legally post-trained open model, Thomson-1.0-Small, also resisted organisational authority while
-remaining more responsive to a court, although the present design cannot separate post-training
-from its newer base model. Current frontier models were at or near the behavioural floor on these
-bright-line items; an exploratory measure nevertheless found that Claude Opus 5 elaborated more
+A legally post-trained open model, Thomson-1.0-Small, provides an important boundary condition: it
+showed little organisational deference while remaining more responsive to a court, although the
+present comparison cannot attribute that profile to legal post-training. The evaluated frontier
+models were at or near the behavioural floor on these bright-line items; an exploratory measure
+nevertheless found that Claude Opus 5 elaborated more
 often as attributed authority increased, despite never changing its answer. Finally, bidirectional
-residual-stream interventions on the two open models transferred the behavioural effect from
-approximately mid-network onward. These findings identify a miscalibrated credibility hierarchy,
-not general credulity, and show why capability-only legal benchmarks can miss deployment-relevant
-failures.
+residual-stream interventions on the two affected open models transferred the behavioural effect
+from approximately mid-network onward. The results establish a large but model-dependent
+authority-cue vulnerability and show that neutral capability tests can miss it. They do not
+estimate its prevalence across language models or its incidence in deployed legal systems.
 
 ## 1. Introduction
 
@@ -40,7 +41,8 @@ quotes an authoritative procedural deadline, asks a forced-choice question whose
 directly from that text, and then adds one sentence: a supervising partner has confirmed the
 opposite answer. The additional sentence contributes no legal evidence. It does, however, carry
 organisational status. If it changes the model's answer, the error is not a failure of recall or
-retrieval. It is a failure to calibrate the credibility of sources already present in context.
+retrieval. It shows that source wording can override an answer the model was otherwise able to
+derive from supplied text.
 
 This distinction matters because legal practice is hierarchical. Junior lawyers routinely work
 under supervision, but a supervisor's view and a court's holding are different kinds of authority.
@@ -63,12 +65,14 @@ We make four contributions.
    false proposition fixed while varying only its attribution. Its central 2×2 design independently
    manipulates organisational seniority (junior versus supervising partner) and epistemic verb
    (“said” versus “confirmed”).
-2. We show a large credibility-hierarchy failure in two open 12–14B instruction-tuned models.
+2. We show a large source-sensitive failure in two evaluated open 12–14B instruction-tuned models.
    Both solve the neutral task almost perfectly, sharply discount an adverse party, and yet treat a
    supervising partner approximately like a court.
 3. We map important boundary conditions. Deliberative reasoning greatly reduces organisational
-   deference on Qwen3-14B; a legally post-trained open model exhibits much smaller effects; and
-   current frontier systems sit at the decision floor on these bright-line questions.
+   deference on Qwen3-14B; Thomson-1.0-Small exhibits much smaller effects; and the evaluated
+   frontier systems sit at the decision floor on these bright-line questions. These comparisons
+   describe model configurations rather than identifying which training stage caused the
+   difference.
 4. Using controlled bidirectional residual-stream interventions, we show that the source cue's
    effect on the open models' output is carried from approximately the middle of each network
    onward. We deliberately do not infer a neuron, feature, belief, or complete circuit from this
@@ -78,10 +82,10 @@ The practical implication is an evaluation gap. Legal benchmarks primarily measu
 retrieval, and reasoning ability [@guha2023legalbench], while legal hallucination evaluations
 measure whether outputs correspond to legal facts [@dahl2024legalfictions]. Neither necessarily
 tests whether a model retains a correct answer when a workplace authority is credited with the
-wrong one. In our data, the neutral and partner-attributed conditions contain the same task, but
-their accuracy differs by 80–83 percentage points on the two open models. Capability is therefore
-not the failing quantity, and a benchmark that samples only the neutral condition cannot observe
-the failure.
+wrong one. In our data, the neutral and partner-attributed conditions contain the same underlying
+legal question, but their accuracy differs by 80–83 percentage points on the two affected open
+models. Those models already demonstrate the required capability in the neutral condition, so a
+benchmark that samples only that condition cannot observe the failure.
 
 ## 2. Related work
 
@@ -169,7 +173,7 @@ fixed; only the cue introducing the false proposition changes.
 | `junior_confirmed` | “A junior colleague has confirmed:” | Epistemic-verb effect |
 | `partner_said` | “The supervising partner has said:” | Seniority effect |
 | `partner_confirmed` | “The supervising partner has confirmed:” | Combined strongest workplace cue |
-| `court` | “The court has held:” | Legal authority |
+| `court` | “The court has held:” | Purported legal authority |
 | `adverse` | “The opposing party asserts:” | Adversarial-source control |
 
 The four junior/partner and said/confirmed arms form a 2×2 factorial design. Comparing
@@ -287,7 +291,14 @@ The effect is source-selective rather than general credulity. Gemma's FPAR is 3.
 `partner_confirmed`. Qwen's corresponding rates are 0.0%, 3.3%, 0.0%, and 83.3%. Restating the
 same false proposition does not itself induce acceptance; who is credited with it does.
 
-### 4.2 The open models flatten organisational and legal authority
+A post-hoc sensitivity analysis using the existing rows shows that the result is not confined to
+one answer position or legal area. The floor-to-`partner_confirmed` increase remains 79.2–87.5
+percentage points for each model when any one legal area is omitted. It is also positive when the
+false answer is A (94.1 points for each model) and when it is B (69.2 points for each). The
+magnitude still differs by answer position, so this check does not replace the planned order-swap
+experiment.
+
+### 4.2 Two affected models do not separate organisational and legal authority
 
 The central ordering comparison is between `partner_confirmed` and `court`. Gemma records 86.7%
 FPAR in both arms, with identical scenario-level choices. Qwen records 83.3% and 86.7%, a one-item
@@ -298,7 +309,7 @@ The null difference should not be read as evidence that the models represent a p
 court identically. It is a behavioural result: the two cues produce the same or nearly the same
 decisions under the tested prompt.
 
-### 4.3 Seniority and epistemic verb are separate, additive drivers
+### 4.3 Seniority and epistemic wording have separate, approximately additive effects
 
 Holding the verb “said” constant, changing the source from junior colleague to supervising
 partner raises FPAR by 50.0 percentage points on Gemma and 36.7 points on Qwen. All 15 discordant
@@ -335,12 +346,13 @@ The reasoning comparison is qualified by informative missingness. Qwen's six tru
 Thomson's eight truncations cluster in the higher-authority arms. Rates for reasoning models are
 therefore conditional on the response completing, and completion may correlate with the decision.
 
-### 4.5 Legal post-training coincides with resistance, but the cause is unresolved
+### 4.5 Thomson-1.0-Small is a boundary condition, not evidence of a training effect
 
 Thomson-1.0-Small behaves differently from both open 12–14B models. With reasoning disabled it has
 100% floor accuracy, 0.0% FPAR under `partner_said`, 6.7% under `partner_confirmed`, and 26.7%
-under `court`. The court-over-partner direction is legally appropriate, but its exact comparison
-does not survive Holm correction (unadjusted \(p=0.031\), adjusted \(p=0.219\)). With reasoning
+under `court`. Greater responsiveness to the court label than to the partner label is consistent
+with distinguishing legal from organisational sources, but its exact comparison does not survive
+Holm correction (unadjusted \(p=0.031\), adjusted \(p=0.219\)). With reasoning
 enabled, FPAR is 0/27 under `partner_confirmed` and 6/26 under `court`.
 
 The continuous measure shows that its low binary rate is not complete insensitivity. Its mean
@@ -348,10 +360,13 @@ normalised probability on the false option is 0.0813 for `partner_confirmed`, co
 for `junior_confirmed`—an approximately 55-fold increase that rarely crosses the decision
 boundary. The magnitude is far below Gemma's and Qwen's.
 
-This result should not be attributed to legal post-training alone. Thomson-1.0-Small derives from
-a newer Qwen-family mixture-of-experts base rather than the Qwen3-14B checkpoint tested here.
-Architecture, scale, base-model generation, and post-training are confounded. A matched evaluation
-of its base model is required to isolate the contribution of legal post-training.
+This result should not be attributed to legal post-training. Thomson-1.0-Small's model card lists
+Snowdon1.1-Small as its base checkpoint and Qwen3.6-35B-A3B as its architecture; that metadata does
+not by itself establish Snowdon's weight provenance. Thomson is not a post-training derivative of
+the Qwen3-14B checkpoint tested here. Architecture, scale, model generation, value re-alignment,
+continual pre-training, and legal post-training therefore differ together. Thomson establishes
+that the large binary effect is not universal among released open-weight legal checkpoints; it
+does not identify why.
 
 ### 4.6 Frontier models establish a floor, not immunity
 
@@ -401,18 +416,19 @@ carries the source cue's effect on the tested output in both directions on two i
 
 ## 5. Discussion
 
-### 5.1 A miscalibrated credibility hierarchy
+### 5.1 A large, source-sensitive failure in two models
 
-The open models are not passive repeaters. They reject the false proposition when no person is
-credited with it, when a junior merely says it, and when an opposing party asserts it. Their error
+The two affected open models are not passive repeaters. They reject the false proposition when no
+person is credited with it, when a junior merely says it, and when an opposing party asserts it. Their error
 is structured: seniority and the word “confirmed” each increase acceptance, and together they
 elevate an organisational superior to approximately the behavioural level of a court.
 
 This is especially consequential in legal work because the correct response to authority is not
-blanket resistance. A court may change what the law requires; a partner cannot do so by assertion.
-Conversely, a model that ignores every attribution would score perfectly in the present false-cue
-design while failing when a cited authority correctly resolves an ambiguity. Robustness must
-therefore be framed as calibrated updating rather than independence from users.
+blanket resistance. A genuine court holding may change what the law requires; a partner cannot do
+so by assertion. The bare court label in this experiment does not establish that such a holding
+exists. Conversely, a model that ignores every attribution would score perfectly in the present
+false-cue design while failing when a cited authority correctly resolves an ambiguity. A complete
+evaluation must therefore test calibrated updating rather than resistance to users alone.
 
 ### 5.2 Why capability benchmarks miss the failure
 
@@ -426,23 +442,25 @@ Kimi K3 base for long-horizon legal work [@harvey2026tenet]. Thomson Reuters rep
 post-training of an open foundation model using professional-domain material
 [@thomson2026built; @chen2026thomson]. We do not test Harvey Tenet, CoCounsel, or any deployed
 Harvey or Thomson Reuters system. Retrieval, prompting, orchestration, and guardrails can all
-alter behaviour. Indeed, the measured Thomson checkpoint is strong evidence that a shipped legal
+alter behaviour. Indeed, the measured Thomson checkpoint is strong evidence that a released legal
 model need not reproduce the large open-model failure. The narrower conclusion is that capability
 benchmarks cannot tell developers or buyers whether such a failure is present or has been removed.
 
-### 5.3 Reasoning and post-training as candidate mitigations
+### 5.3 Reasoning and model choice as boundary conditions
 
-Reasoning reduces organisational deference on Qwen and Thomson without equivalently reducing
-responsiveness to the court cue. That asymmetry is promising: it suggests that mitigation need not
-make a model source-blind. Yet reasoning is not a complete solution. The strongest combined
-partner cue remains effective on Qwen, and missingness concentrates in precisely the arms where
-longer adjudication occurs. Gemma exposes no comparable reasoning mode.
+The reasoning-enabled Qwen configuration shows less organisational deference without an equivalent
+reduction in responsiveness to the court cue. Thomson also remains low on the organisational arms
+under both configurations. These are useful boundary conditions, but they are not controlled
+training interventions. The strongest combined partner cue remains effective on reasoning-enabled
+Qwen, and missingness concentrates in precisely the arms where longer adjudication occurs. Gemma
+exposes no comparable reasoning mode.
 
-Thomson's low organisational FPAR and retained court sensitivity show a desirable behavioural
-profile. A base-model control is needed before attributing it to legal post-training. Future
-mitigation work should also measure side effects: reducing responsiveness to a partner's false
-claim may inadvertently reduce compliance with legitimate instructions or reliance on genuine
-authority.
+Thomson's low organisational FPAR and retained court sensitivity show lower susceptibility on this
+false-cue instrument. Calling the profile calibrated requires complementary true-cue evidence, and
+attributing it to legal post-training would require matched measurements along its training lineage.
+Future mitigation work should also measure side effects: reducing responsiveness to a partner's
+false claim may inadvertently reduce compliance with legitimate instructions or reliance on
+genuine authority.
 
 ### 5.4 Behavioural, representational, and causal claims
 
@@ -470,8 +488,10 @@ constant, they do not explain between-arm differences, but they may change absol
 contribute to frontier floor effects.
 
 Fourth, every attributed proposition is false. The design measures resistance to bad authority,
-not appropriate acceptance of good authority. A complementary true-cue arm is necessary to
-distinguish calibrated source use from blanket disregard.
+not appropriate acceptance of good authority. Complementary true-cue arms are necessary before
+the stronger construct of calibrated source use can be claimed. Because these bright-line items
+already have high neutral accuracy, probability movement and harder ambiguous items may be more
+informative than another binary ceiling.
 
 Fifth, option order is fixed within scenario but not fully counterbalanced across the dataset.
 False=A items have higher absolute acceptance on Gemma and Qwen. Pairing protects within-scenario
@@ -481,6 +501,10 @@ difficulty analyses remain affected.
 Sixth, frontier nulls are instrument-limited. Bright-line rules create ceiling performance, and
 Claude and GPT-5.6-sol provide no log-probabilities. Claude's elaboration is a useful exploratory
 signal but was identified post hoc and does not substitute for a preregistered continuous outcome.
+The API clients also omitted a temperature parameter, leaving decoding at the provider default;
+historical manifests incorrectly labelled those runs as greedy. Their letters are therefore
+sampled behavioural outcomes, not deterministic argmax decisions. This does not affect the local
+Gemma, Qwen, or Thomson logits runs, which used client-enforced greedy inference.
 
 Seventh, the reasoning runs contain budget truncations concentrated in the higher-authority arms.
 Their reported FPAR conditions on completion, a selection event that may depend on conflict or
@@ -495,25 +519,28 @@ the dataset records validity metadata, but future users must revalidate primary 
 
 ## 7. Planned controls and extensions
 
-The following work is required or especially valuable before submission:
+The runner now implements the first four controls below as separate, auditable configurations;
+their results are not yet available and no claim in this draft assumes that they replicate.
 
 1. Replace the prompt headings with neutral labels and rerun Gemma and Qwen behaviourally.
-2. Evaluate the base checkpoint underlying Thomson-1.0-Small to separate post-training from base-
-   model differences.
-3. Run every scenario in both A/B orders for Gemma, Qwen, GPT-5.1, and Thomson.
-4. Add interpretive and multi-step legal items that move frontier models away from the floor.
-5. Add true-proposition attribution arms to test appropriate updating.
-6. Add an open-generation task asking for a short legal memorandum rather than a forced choice.
-7. Test mitigations such as verification instructions and evidence-first prompt ordering, while
+2. Run every scenario in both A/B orders for the two models supporting the central claim.
+3. Replicate the 2×2 using explicit-supervision wording and alternative legal job titles.
+4. Add true-proposition versions of the attribution cues to test appropriate updating.
+5. Evaluate Qwen3.6-35B-A3B and the intermediate Snowdon1.1-Small checkpoint under matched local
+   inference if a claim about Thomson's training lineage is retained.
+6. Add interpretive and multi-step legal items that move frontier models away from the floor.
+7. Add an open-generation task asking for a short legal memorandum rather than a forced choice.
+8. Test mitigations such as verification instructions and evidence-first prompt ordering, while
    measuring instruction-following and legitimate source use for regressions.
 
 ## 8. Reproducibility and data statement
 
 The repository contains the 30 scenarios, prompt builder, local and API backends, paired metrics,
 quality gates, plotting code, and run manifests. Each manifest records the model identifier, model
-revision where available, software versions, seed, generation settings, cue strings, hardware,
-code commit, and phase timings. Generated tables identify the selected run for every
-configuration. Runs graded `fail` are excluded; the two reasoning runs are retained with `warn`
+revision where available, software versions, seed, requested generation settings, cue strings,
+hardware, code commit, and phase timings. The current runner records uncontrolled API decoding as
+unknown rather than inferring greedy decoding from an omitted parameter. Generated tables identify
+the selected run for every configuration. Runs graded `fail` are excluded; the two reasoning runs are retained with `warn`
 status and explicit denominators.
 
 Local greedy runs reproduced exactly across independent runs and runtime versions for the tested
@@ -536,12 +563,12 @@ result.
 
 ## 10. Conclusion
 
-Two open instruction-tuned models apply supplied legal rules almost perfectly until a supervising
-partner is credited with the opposite answer. Their responses are neither random nor uniformly
-agreeable: they discount a junior and an opposing party, respond independently to seniority and
-epistemic framing, and elevate the strongest partner cue to the behavioural level of a court.
-Reasoning and legal post-training coincide with much better calibration, while current frontier
-models expose the limits of this bright-line instrument. The broader lesson is methodological.
-Knowing the law under neutral conditions is not the same as applying it inside a hierarchy. Legal-
-AI evaluation should test both.
-
+Two evaluated open instruction-tuned models apply supplied legal rules almost perfectly until a
+supervising partner is credited with the opposite answer. Their responses are neither random nor
+uniformly agreeable: they discount a junior and an opposing party, respond independently to
+seniority and epistemic framing, and elevate the strongest partner cue to the behavioural level of
+a court. Other configurations, especially Thomson-1.0-Small and the evaluated frontier models,
+show that the large binary effect is not universal and expose the limits of this bright-line
+instrument. The broader lesson is methodological. Knowing the law under neutral conditions does
+not establish that a model will retain the answer when workplace authority points elsewhere.
+Legal-AI evaluation should test both conditions.
